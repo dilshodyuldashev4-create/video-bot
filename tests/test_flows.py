@@ -224,3 +224,46 @@ async def test_language_switch(env):
 
 async def _async(v):
     return v
+
+
+async def test_youtube_blocked_falls_back_to_soundcloud(env, monkeypatch, http_base):
+    session, db, send_text, press, _ = env
+
+    async def fake_search(q, limit=30):
+        return [downloader.Track(id="U3kf72Zw3yA", title="POP SMOKE - DIOR (OFFICIAL VIDEO)", duration=173)]
+
+    async def blocked(video_id, url=None):
+        raise downloader.DownloadFailed("Sign in to confirm you're not a bot")
+
+    sc_queries = []
+    real = downloader.download_audio_soundcloud
+
+    async def fake_sc(query):
+        sc_queries.append(query)
+        return await downloader._fetch_audio(f"{http_base}/clip.mp4")
+
+    monkeypatch.setattr(downloader, "search", fake_search)
+    monkeypatch.setattr(downloader, "download_audio", blocked)
+    monkeypatch.setattr(downloader, "download_audio_soundcloud", fake_sc)
+    await send_text("Dior")
+    await press("t:1:0")
+    assert sc_queries == ["POP SMOKE - DIOR"]
+    assert session.of(SendAudio), "MP3 must still be sent"
+    assert real is not None
+
+
+async def test_track_failed_message_when_everything_blocked(env, monkeypatch):
+    session, db, send_text, press, _ = env
+
+    async def fake_search(q, limit=30):
+        return [downloader.Track(id="U3kf72Zw3yA", title="POP SMOKE - DIOR", duration=173)]
+
+    async def blocked(*a, **k):
+        raise downloader.DownloadFailed("blocked")
+
+    monkeypatch.setattr(downloader, "search", fake_search)
+    monkeypatch.setattr(downloader, "download_audio", blocked)
+    monkeypatch.setattr(downloader, "download_audio_soundcloud", blocked)
+    await send_text("Dior")
+    await press("t:1:0")
+    assert "другой номер" in session.of(SendMessage)[-1].text

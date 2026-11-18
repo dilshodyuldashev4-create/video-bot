@@ -8,7 +8,7 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, Message
 
-from ..common import send_track, user_lock
+from ..common import send_soundcloud, send_track, user_lock
 from ..config import config
 from ..db import DB
 from ..services import downloader, recognizer
@@ -56,11 +56,12 @@ async def _deliver(message: Message, bot: Bot, db: DB, lang: str, song: Song | N
     await db.incr("recognitions")
     caption = t(lang, "recognized", title=esc(song.title), artist=esc(song.artist))
     track = await downloader.find_best(song.title, song.artist)
-    if not track:
-        await message.reply(t(lang, "song_not_found_dl", title=esc(song.title), artist=esc(song.artist)))
-        return
     try:
-        await send_track(bot, db, message.chat.id, track.id, lang, caption=caption, reply_to=message.message_id)
+        if track:
+            await send_track(bot, db, message.chat.id, track.id, lang, caption=caption,
+                             reply_to=message.message_id, query=song.query)
+        else:  # YouTube search unavailable -> straight to SoundCloud
+            await send_soundcloud(bot, db, message.chat.id, song.query, lang, caption, message.message_id)
     except downloader.DownloadFailed:
         await message.reply(t(lang, "song_not_found_dl", title=esc(song.title), artist=esc(song.artist)))
 

@@ -41,6 +41,16 @@
    `https://api.telegram.org/bot<ТОКЕН>/logOut`.
 4. `docker compose --profile local-api up -d --build`
 
+### Если сервер заблокирован (Hetzner, AWS и т.п.)
+
+YouTube, Instagram и TikTok часто блокируют IP дата-центров («Sign in to confirm you're not a bot»). В `docker-compose.yml` для этого уже всё включено, ничего настраивать не нужно:
+
+- **Cloudflare WARP** (`warp`): если прямой запрос заблокирован, бот повторяет его через WARP и следующий час ходит на этот сайт сразу через него.
+- **PO-токены для YouTube** (`pot-provider`): yt-dlp сам получает токены, которые YouTube требует от серверов.
+- **SoundCloud как запасной источник MP3**: если YouTube не отдаёт трек ни напрямую, ни через WARP, бот находит ту же песню на SoundCloud.
+
+Команда **`/diag`** в Telegram показывает, что работает с сервера: YouTube, SoundCloud, TikTok напрямую и через прокси (если задан `ADMIN_IDS`, команда доступна только админам).
+
 ### Instagram и YouTube cookies
 
 Instagram часто отдаёт видео только авторизованным пользователям, а YouTube иногда просит «подтвердить, что вы не бот» на серверах. В этом случае:
@@ -72,8 +82,15 @@ python -m bot
 | `/help`  | Как пользоваться |
 | `/lang`  | Язык: русский / o'zbekcha |
 | `/stats` | Статистика (только для `ADMIN_IDS`) |
+| `/diag`  | Проверка: какие сайты доступны с сервера |
 
 ## Обслуживание
+
+Обновление бота (одной командой):
+
+```bash
+cd ~/video-bot && git pull && docker compose up -d --build
+```
 
 - **Регулярно обновляйте yt-dlp.** YouTube, Instagram и TikTok часто меняют сайты, и новые версии yt-dlp это чинят: `docker compose build --pull --no-cache && docker compose up -d` (или `pip install -U "yt-dlp[default]"`).
 - Временные файлы удаляются автоматически.
