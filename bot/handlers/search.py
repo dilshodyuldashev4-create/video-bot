@@ -63,10 +63,11 @@ async def cb_track(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
         await call.answer("⏳")
         status = await call.message.answer(t(lang, "downloading"))
         try:
-            await send_track(bot, db, call.message.chat.id, track["id"], lang)
+            await send_track(bot, db, call.message.chat.id, track["id"], lang,
+                             query=downloader.clean_title(track["title"]))
         except downloader.DownloadFailed:
             log.warning("audio download failed for %s", track["id"], exc_info=True)
-            await call.message.answer(t(lang, "dl_failed"))
+            await call.message.answer(t(lang, "track_failed"))
         except Exception:
             log.exception("send_track failed")
             await call.message.answer(t(lang, "error"))

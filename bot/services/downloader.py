@@ -4,6 +4,7 @@ import difflib
 import logging
 import re
 import shutil
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -83,7 +84,72 @@ def _base_opts(workdir: Path | None = None) -> dict:
         opts["outtmpl"] = "%(id).80s_%(autonumber)s.%(ext)s"
     if config.cookies:
         opts["cookiefile"] = config.cookies
+    if config.pot_url:
+        opts["extractor_args"] = {"youtubepot-bgutilhttp": {"base_url": [config.pot_url]}}
     return opts
+
+
+# ---------------------------------------------------------------- blocked-IP fallbacks
+#
+# Datacenter IPs (Hetzner, AWS...) are often blocked: YouTube says "Sign in to confirm
+# you're not a bot", Instagram asks to log in, TikTok returns empty responses.
+# Every request is tried directly first and then through PROXY_URL (Cloudflare WARP in
+# docker-compose). If the proxy works and the direct route didn't, the proxy is used
+# first for that site for the next hour.
+
+_PREFER_PROXY_FOR = 3600
+_proxy_first_until: dict[str, float] = {}
+
+_PERMANENT = ("private video", "video unavailable. this video has been removed", "copyright",
+              "this video has been removed", "account associated with this video has been terminated",
+              "is not a valid url", "unsupported url", "does not pass filter")
+
+
+def _site(url: str) -> str:
+    m = re.match(r"(?:https?://)?(?:www\.|m\.)?([^/:?#]+)", url)
+    host = m.group(1).lower() if m else url
+    for key in ("youtube", "youtu.be", "instagram", "tiktok", "soundcloud"):
+        if key in host:
+            return "youtube" if key == "youtu.be" else key
+    if url.startswith("ytsearch"):
+        return "youtube"
+    if url.startswith("scsearch"):
+        return "soundcloud"
+    return host
+
+
+def _routes(url: str) -> list[dict]:
+    routes: list[dict] = [{}]
+    if config.proxy:
+        via = {"proxy": config.proxy}
+        if _proxy_first_until.get(_site(url), 0) > time.time():
+            routes.insert(0, via)
+        else:
+            routes.append(via)
+    return routes
+
+
+def _extract(url: str, opts: dict, download: bool = True) -> dict:
+    """yt-dlp extract_info with the direct -> proxy fallback (blocking; run in a thread)."""
+    last: Exception | None = None
+    for extra in _routes(url):
+        try:
+            with yt_dlp.YoutubeDL(opts | extra) as ydl:
+                info = ydl.extract_info(url, download=download)
+        except yt_dlp.utils.DownloadError as e:
+            last = e
+            log.warning("yt-dlp failed (%s) for %s: %s", "proxy" if extra else "direct", url, str(e)[:300])
+            if any(p in str(e).lower() for p in _PERMANENT):
+                break
+            continue
+        site = _site(url)
+        if extra:
+            _proxy_first_until[site] = time.time() + _PREFER_PROXY_FOR
+        else:
+            _proxy_first_until.pop(site, None)
+        return info
+    assert last is not None
+    raise last
 
 
 def _new_workdir() -> Path:
@@ -101,8 +167,7 @@ async def _in_thread(fn, *args):
 
 def _search_sync(query: str, limit: int) -> list[Track]:
     opts = _base_opts() | {"extract_flat": "in_playlist", "skip_download": True}
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
+    info = _extract(f"ytsearch{limit}:{query}", opts, download=False)
     tracks: list[Track] = []
     seen: set[str] = set()
     for e in (info or {}).get("entries") or []:
@@ -127,6 +192,14 @@ async def search(query: str, limit: int = 30) -> list[Track]:
     except Exception:
         log.exception("search failed: %s", query)
         return []
+
+
+def clean_title(title: str) -> str:
+    """'POP SMOKE - DIOR (OFFICIAL VIDEO) #hashtag' -> 'POP SMOKE - DIOR'"""
+    title = _JUNK.sub("", title)
+    title = re.sub(r"[#@]\w+", "", title)
+    title = re.sub(r"\s*[\(\[][^\)\]]*(?:official|video|lyric|audio|hd|4k|clip)[^\)\]]*[\)\]]", "", title, flags=re.I)
+    return re.sub(r"\s+", " ", title).strip(" -|/")
 
 
 def similarity(a: str, b: str) -> float:
@@ -174,8 +247,8 @@ def split_title(info: dict) -> tuple[str, str]:
     return uploader, raw
 
 
-def _download_audio_sync(url: str, workdir: Path) -> dict:
-    opts = _base_opts(workdir) | {
+def _audio_opts(workdir: Path) -> dict:
+    return _base_opts(workdir) | {
         "format": "bestaudio[ext=m4a]/bestaudio/best",
         "writethumbnail": True,
         "match_filter": yt_dlp.utils.match_filter_func(f"duration <? {MAX_TRACK_SECONDS + 60}"),
@@ -186,15 +259,44 @@ def _download_audio_sync(url: str, workdir: Path) -> dict:
             {"key": "EmbedThumbnail", "already_have_thumbnail": True},
         ],
     }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        return ydl.extract_info(url, download=True)
+
+
+def _download_audio_sync(url: str, workdir: Path) -> dict:
+    return _extract(url, _audio_opts(workdir), download=True)
 
 
 async def download_audio(video_id: str, url: str | None = None) -> AudioFile:
-    workdir = _new_workdir()
     url = url or f"https://www.youtube.com/watch?v={video_id}"
+    return await _fetch_audio(url)
+
+
+def _soundcloud_sync(query: str, workdir: Path) -> dict:
+    """Find the song on SoundCloud (works from server IPs) and download the best match."""
+    probe_opts = _base_opts() | {"extract_flat": "in_playlist", "skip_download": True}
+    found = _extract(f"scsearch5:{query}", probe_opts, download=False)
+    entries = [e for e in (found or {}).get("entries") or [] if e and e.get("url")]
+    if not entries:
+        raise yt_dlp.utils.DownloadError("nothing on SoundCloud")
+    best = max(entries, key=lambda e: similarity(query, f"{e.get('uploader') or ''} {e.get('title') or ''}")
+               + similarity(query, e.get("title") or ""))
+    words = {w for w in re.findall(r"\w{3,}", query.lower())}
+    title_words = set(re.findall(r"\w{3,}", f"{best.get('uploader') or ''} {best.get('title') or ''}".lower()))
+    if words and not words & title_words:
+        raise yt_dlp.utils.DownloadError("no matching track on SoundCloud")
+    return _extract(best["url"], _audio_opts(workdir), download=True)
+
+
+async def download_audio_soundcloud(query: str) -> AudioFile:
+    return await _fetch_audio(query, soundcloud=True)
+
+
+async def _fetch_audio(target: str, soundcloud: bool = False) -> AudioFile:
+    workdir = _new_workdir()
     try:
-        info = await _in_thread(_download_audio_sync, url, workdir)
+        if soundcloud:
+            info = await _in_thread(_soundcloud_sync, target, workdir)
+        else:
+            info = await _in_thread(_download_audio_sync, target, workdir)
     except yt_dlp.utils.DownloadError as e:
         shutil.rmtree(workdir, ignore_errors=True)
         raise DownloadFailed(str(e)) from e
@@ -238,8 +340,7 @@ def _video_opts(workdir: Path, height: int, platform: str) -> dict:
 
 
 def _download_video_sync(url: str, workdir: Path, height: int, platform: str) -> dict:
-    with yt_dlp.YoutubeDL(_video_opts(workdir, height, platform)) as ydl:
-        return ydl.extract_info(url, download=True)
+    return _extract(url, _video_opts(workdir, height, platform), download=True)
 
 
 def _looks_big(info: dict) -> bool:
@@ -296,3 +397,25 @@ async def download_video(url: str, platform: str) -> VideoResult:
     if isinstance(last_err, TooBig) or last_err is None:
         raise TooBig()
     raise DownloadFailed(str(last_err))
+
+
+# ---------------------------------------------------------------- diagnostics (/diag)
+
+def check_route(url: str, use_proxy: bool) -> str | None:
+    """Resolve a URL without downloading. Returns None if OK, else a short error."""
+    if use_proxy and not config.proxy:
+        return "PROXY_URL not set"
+    opts = _base_opts() | {"skip_download": True, "format": "bestaudio/best"}
+    if use_proxy:
+        opts["proxy"] = config.proxy
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.extract_info(url, download=False)
+        return None
+    except Exception as e:  # noqa: BLE001
+        msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+        return msg[:160]
+
+
+async def check_route_async(url: str, use_proxy: bool) -> str | None:
+    return await asyncio.to_thread(check_route, url, use_proxy)
