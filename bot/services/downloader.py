@@ -100,7 +100,7 @@ def _base_opts(workdir: Path | None = None) -> dict:
 _PREFER_PROXY_FOR = 3600
 _proxy_first_until: dict[str, float] = {}
 
-_PERMANENT = ("private video", "video unavailable. this video has been removed", "copyright",
+_PERMANENT = ("drm protected", "private video", "video unavailable. this video has been removed", "copyright",
               "this video has been removed", "account associated with this video has been terminated",
               "is not a valid url", "unsupported url", "does not pass filter")
 
@@ -271,19 +271,30 @@ async def download_audio(video_id: str, url: str | None = None) -> AudioFile:
 
 
 def _soundcloud_sync(query: str, workdir: Path) -> dict:
-    """Find the song on SoundCloud (works from server IPs) and download the best match."""
+    """Find the song on SoundCloud and download the best matching track.
+    Some SoundCloud tracks are DRM-protected (Go+), so several candidates are tried."""
     probe_opts = _base_opts() | {"extract_flat": "in_playlist", "skip_download": True}
-    found = _extract(f"scsearch5:{query}", probe_opts, download=False)
+    found = _extract(f"scsearch10:{query}", probe_opts, download=False)
     entries = [e for e in (found or {}).get("entries") or [] if e and e.get("url")]
-    if not entries:
-        raise yt_dlp.utils.DownloadError("nothing on SoundCloud")
-    best = max(entries, key=lambda e: similarity(query, f"{e.get('uploader') or ''} {e.get('title') or ''}")
-               + similarity(query, e.get("title") or ""))
-    words = {w for w in re.findall(r"\w{3,}", query.lower())}
-    title_words = set(re.findall(r"\w{3,}", f"{best.get('uploader') or ''} {best.get('title') or ''}".lower()))
-    if words and not words & title_words:
+    words = set(re.findall(r"\w{3,}", query.lower()))
+
+    def label(e: dict) -> str:
+        return f"{e.get('uploader') or ''} {e.get('title') or ''}"
+
+    candidates = [e for e in entries if not words or words & set(re.findall(r"\w{3,}", label(e).lower()))]
+    candidates.sort(key=lambda e: similarity(query, label(e)) + similarity(query, e.get("title") or ""),
+                    reverse=True)
+    if not candidates:
         raise yt_dlp.utils.DownloadError("no matching track on SoundCloud")
-    return _extract(best["url"], _audio_opts(workdir), download=True)
+    last: Exception | None = None
+    for e in candidates[:4]:
+        try:
+            return _extract(e["url"], _audio_opts(workdir), download=True)
+        except yt_dlp.utils.DownloadError as err:  # DRM / geo-blocked / removed -> next one
+            last = err
+            for f in workdir.iterdir():
+                f.unlink(missing_ok=True)
+    raise last
 
 
 async def download_audio_soundcloud(query: str) -> AudioFile:
@@ -406,6 +417,8 @@ def check_route(url: str, use_proxy: bool) -> str | None:
     if use_proxy and not config.proxy:
         return "PROXY_URL not set"
     opts = _base_opts() | {"skip_download": True, "format": "bestaudio/best"}
+    if url.startswith(("scsearch", "ytsearch")):
+        opts["extract_flat"] = "in_playlist"
     if use_proxy:
         opts["proxy"] = config.proxy
     try:
