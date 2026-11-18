@@ -121,3 +121,24 @@ def test_pot_provider_args_are_valid(monkeypatch, http_base, tmp_path):
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(f"{http_base}/clip.mp4", download=True)
     assert info and list(tmp_path.glob("*.mp3"))
+
+
+def test_soundcloud_skips_drm_tracks(monkeypatch, tmp_path):
+    _setup(monkeypatch, proxy="")
+    tried = []
+
+    class SC(FakeYDL):
+        def extract_info(self, url, download=True):
+            if url.startswith("scsearch"):
+                return {"entries": [
+                    {"url": "https://soundcloud.com/popsmoke/dior", "title": "Dior", "uploader": "POP SMOKE"},
+                    {"url": "https://soundcloud.com/fan/dior", "title": "dior live", "uploader": "fan"},
+                ]}
+            tried.append(url)
+            if url.endswith("popsmoke/dior"):
+                raise yt_dlp.utils.DownloadError("ERROR: [soundcloud] 656255261: This video is DRM protected")
+            return {"id": "ok", "title": "Dior"}
+
+    monkeypatch.setattr(downloader.yt_dlp, "YoutubeDL", SC)
+    assert downloader._soundcloud_sync("POP SMOKE - DIOR", tmp_path)["id"] == "ok"
+    assert len(tried) == 2
