@@ -124,3 +124,25 @@ def test_mp3site_parser_and_pick():
     assert tracks[1].url == "https://rus.hitmotop.com/get/music/2.mp3" and tracks[1].duration == 201
     picked = mp3sites.pick(tracks, "Kecholmadim", "UzBoom")
     assert [t.title for t in picked] == ["Kecholmadim", "Kecholmadim (Remix)"]  # unrelated dropped, remix last
+
+
+def test_lyrics_sources(monkeypatch):
+    import json as _json
+
+    from bot.services import lyrics
+
+    page = ('<div data-lyrics-container="true">[Verse 1]<br/>Ko&#x27;zlaring <i>yulduz</i><br>'
+            '<div data-exclude-from-selection="true">Embed</div>Kecholmadim</div>'
+            '<div>ads</div><div data-lyrics-container="true">Chorus line</div>')
+    assert lyrics.parse_genius_page(page) == "[Verse 1]\nKo'zlaring yulduz\nKecholmadim\nChorus line"
+
+    def fake_get(url, **kw):
+        if "lrclib" in url:
+            return _json.dumps([{"trackName": "Other song", "artistName": "X", "plainLyrics": "nope"},
+                                {"trackName": "Kecholmadim", "artistName": "UzBoom",
+                                 "syncedLyrics": "[00:01.00] line one\n[00:05.20] line two"}]).encode()
+        raise OSError("offline")
+
+    monkeypatch.setattr(lyrics, "http_get", fake_get)
+    assert lyrics.find("Kecholmadim (Official Video)", "UzBoom") == "line one\nline two"
+    assert lyrics.find("Unknown", "Nobody") is None

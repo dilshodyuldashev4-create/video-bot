@@ -12,8 +12,9 @@ from aiogram.types import BotCommand
 
 from .config import config
 from .db import DB
-from .handlers import admin, library, links, recognize, search, start
+from .handlers import admin, inline, library, links, recognize, search, start
 from .middlewares import LangMiddleware
+from .services import downloader
 from .utils import cleanup_old
 
 log = logging.getLogger("bot")
@@ -25,6 +26,8 @@ async def housekeeping(db: DB) -> None:
             cleanup_old(config.tmp_dir, max_age=2 * 3600)
             cleanup_old(config.data_dir / "clips", max_age=48 * 3600)
             await db.prune_searches()
+            ok = await asyncio.to_thread(downloader.probe_youtube_sync)
+            log.info("YouTube from this server: %s", "OK" if ok else "blocked, using helpers")
         except Exception:
             log.exception("housekeeping failed")
         await asyncio.sleep(1800)
@@ -35,8 +38,11 @@ def build_dispatcher(db: DB) -> Dispatcher:
     mw = LangMiddleware(db)
     dp.message.outer_middleware(mw)
     dp.callback_query.outer_middleware(mw)
+    dp.inline_query.outer_middleware(mw)
+    dp.chosen_inline_result.outer_middleware(mw)
     # order matters: commands, then links, then media, then plain text = search
-    dp.include_routers(admin.router, start.router, library.router, links.router, recognize.router, search.router)
+    dp.include_routers(admin.router, start.router, inline.router, library.router, links.router, recognize.router,
+                       search.router)
     return dp
 
 

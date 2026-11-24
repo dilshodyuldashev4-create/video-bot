@@ -70,11 +70,11 @@ def _base_opts(workdir: Path | None = None) -> dict:
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
-        "socket_timeout": 30,
-        "retries": 5,
-        "fragment_retries": 10,
-        "extractor_retries": 3,
-        "concurrent_fragment_downloads": 4,
+        "socket_timeout": 20,
+        "retries": 3,
+        "fragment_retries": 5,
+        "extractor_retries": 1,  # a bot check never passes on a retry: fall back fast instead
+        "concurrent_fragment_downloads": 8,
         "geo_bypass": True,
         "noplaylist": True,
         "cachedir": str(config.data_dir / "yt-dlp-cache"),
@@ -137,7 +137,7 @@ _BOT_CHECK = ("not a bot", "sign in to confirm", "confirm you're not", "confirm 
 _YT_FALLBACK_CLIENTS = (["tv_simply"], ["web_embedded"], ["mweb"], ["web_safari"])
 # When every route/client got the bot check, YouTube downloads are skipped for a while
 # and songs come from the other sources straight away (no 10 s of pointless retries).
-YT_BLOCK_PAUSE = 15 * 60
+YT_BLOCK_PAUSE = 30 * 60
 _yt_blocked_until = 0.0
 
 
@@ -240,12 +240,26 @@ def _search_sync(query: str, limit: int) -> list[Track]:
     return tracks
 
 
+SEARCH_TTL = 15 * 60
+_search_cache: dict[tuple[str, int], tuple[float, list[Track]]] = {}
+
+
 async def search(query: str, limit: int = 30) -> list[Track]:
+    """YouTube search (results cached for 15 min: repeated and popular queries are instant)."""
+    key = (query.lower().strip(), limit)
+    hit = _search_cache.get(key)
+    if hit and time.time() - hit[0] < SEARCH_TTL:
+        return list(hit[1])
     try:
-        return await _in_thread(_search_sync, query, limit)
+        tracks = await _in_thread(_search_sync, query, limit)
     except Exception:
         log.exception("search failed: %s", query)
         return []
+    if tracks:
+        if len(_search_cache) > 2000:
+            _search_cache.clear()
+        _search_cache[key] = (time.time(), tracks)
+    return tracks
 
 
 def clean_title(title: str) -> str:
@@ -315,6 +329,13 @@ async def download_song(title: str, artist: str = "", prefer_id: str | None = No
             errors.append(f"yt:{video_id}: {str(e)[:120]}")
             return None
 
+    sites_tried = False
+    if youtube_blocked():  # the MP3 catalogue answers in ~2 s; YouTube helpers are slower
+        sites_tried = True
+        try:
+            return await download_from_sites(title, artist)
+        except DownloadFailed as e:
+            errors.append(f"sites: {str(e)[:160]}")
     if prefer_id and (audio := await attempt(prefer_id)):
         return audio
 
@@ -324,10 +345,11 @@ async def download_song(title: str, artist: str = "", prefer_id: str | None = No
         title,
     ) if q))
 
-    try:
-        return await download_from_sites(title, artist)
-    except DownloadFailed as e:
-        errors.append(f"sites: {str(e)[:160]}")
+    if not sites_tried:
+        try:
+            return await download_from_sites(title, artist)
+        except DownloadFailed as e:
+            errors.append(f"sites: {str(e)[:160]}")
 
     if not youtube_blocked():
         for q in queries[:2]:
@@ -457,11 +479,6 @@ async def _youtube_chain(ytdlp, helpers):
             continue
         try:
             return await run()
-        except DownloadFailed as e:
-            errors.append(str(e)[:200])
-    if blocked:  # every helper failed: maybe YouTube lets us through again
-        try:
-            return await ytdlp()
         except DownloadFailed as e:
             errors.append(str(e)[:200])
     raise DownloadFailed("; ".join(errors) or "nothing worked")
@@ -750,3 +767,14 @@ def check_route(url: str, use_proxy: bool | str) -> str | None:
 
 async def check_route_async(url: str, use_proxy: bool | str) -> str | None:
     return await asyncio.to_thread(check_route, url, use_proxy)
+
+
+def probe_youtube_sync() -> bool:
+    """Background check (every 30 min): is YouTube blocking us? Sets the block flag so that
+    users never wait for a blocked YouTube; clears it once YouTube works again."""
+    opts = _base_opts() | {"skip_download": True, "format": "bestaudio/best"}
+    try:
+        _extract("https://www.youtube.com/watch?v=jNQXAC9IVRw", opts, download=False)
+        return True
+    except Exception:  # noqa: BLE001
+        return False

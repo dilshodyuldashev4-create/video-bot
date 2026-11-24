@@ -55,6 +55,7 @@ def audio_kb(bot_username: str, lang: str, liked: bool = False) -> InlineKeyboar
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t(lang, "btn_liked" if liked else "btn_like"),
                               style=ButtonStyle.SUCCESS if liked else ButtonStyle.DANGER, callback_data="lk")],
+        [InlineKeyboardButton(text=t(lang, "btn_lyrics"), style=ButtonStyle.SUCCESS, callback_data="ly")],
         [InlineKeyboardButton(text=t(lang, "btn_up"), style=ButtonStyle.PRIMARY, callback_data="fx:up"),
          InlineKeyboardButton(text=t(lang, "btn_slow"), style=ButtonStyle.PRIMARY, callback_data="fx:slow")],
         share_row(bot_username, lang),
