@@ -72,8 +72,8 @@ async def env(data_dir):
     bot = Bot("1:test", session=session)
     db = DB(data_dir / "t.sqlite3")
     await db.connect()
-    from bot.handlers import library, links, recognize, search, start
-    for r in (library.router, links.router, recognize.router, search.router, start.router):
+    from bot.handlers import admin, library, links, recognize, search, start
+    for r in (admin.router, library.router, links.router, recognize.router, search.router, start.router):
         r._parent_router = None  # allow a fresh Dispatcher per test
     dp = build_dispatcher(db)
     counter = iter(range(1, 10_000))
@@ -410,3 +410,77 @@ async def test_fx_filters_change_duration(media_dir, tmp_path):
     d_slow = (await media.probe(slow))["duration"]
     assert 22 < d_up < 26          # 30 s / 1.25 = 24 s
     assert 34 < d_slow < 37.5      # 30 s / 0.85 ≈ 35.3 s
+
+
+async def test_admin_panel_owner_stats_broadcast(env, monkeypatch):
+    session, db, send_text, press, _ = env
+    from aiogram.exceptions import TelegramForbiddenError
+    from aiogram.methods import CopyMessage, EditMessageText as EMT
+    from bot.config import config
+    from bot.handlers import admin
+    monkeypatch.setattr(config, "admin_ids", frozenset())
+    monkeypatch.setattr(admin, "BROADCAST_DELAY", 0)
+
+    # first /admin on a fresh bot makes you the owner
+    await send_text("/admin")
+    texts = [m.text for m in session.of(SendMessage)[-2:]]
+    assert "владелец" in texts[0] and "Админ-панель" in texts[1]
+    assert await db.admin_ids() == {USER.id}
+
+    # other users: 2 normal + 1 that blocked the bot
+    for uid in (1001, 1002, 1003):
+        await db.ensure_user(uid, "uz")
+    await press("adm:stats")
+    stats = session.of(EMT)[-1].text
+    assert "Всего пользователей: <b>4</b>" in stats and "🇺🇿 3" in stats
+
+    calls = []
+    orig = FakeSession._make
+
+    async def make(self, bot, method):
+        if isinstance(method, CopyMessage) and method.chat_id != CHAT.id:
+            calls.append(method.chat_id)
+            if method.chat_id == 1003:
+                raise TelegramForbiddenError(method=method, message="Forbidden: bot was blocked by the user")
+            return Message(message_id=9, date=NOW, chat=Chat(id=method.chat_id, type="private"))
+        if isinstance(method, CopyMessage):
+            return Message(message_id=9, date=NOW, chat=CHAT)
+        return await orig(self, bot, method)
+
+    monkeypatch.setattr(FakeSession, "_make", make)
+    await press("adm:bc")
+    assert "Получателей: <b>4</b>" in session.of(EMT)[-1].text
+    await send_text("🔥 Новый релиз уже в боте!")
+    confirm = session.of(SendMessage)[-1]
+    assert "Отправить" in confirm.reply_markup.inline_keyboard[0][0].text
+    await press("adm:bc_go")
+    import asyncio
+    for _ in range(50):
+        await asyncio.sleep(0.02)
+        if "завершена" in session.of(EMT)[-1].text:
+            break
+    report = session.of(EMT)[-1].text
+    assert sorted(calls) == [1001, 1002, 1003]
+    assert "Доставлено: <b>3</b>" in report and "Заблокировали бота: <b>1</b>" in report
+    assert 1003 not in await db.broadcast_ids()
+
+
+async def test_admin_ignores_strangers(env, monkeypatch):
+    session, db, send_text, press, _ = env
+    from bot.config import config
+    monkeypatch.setattr(config, "admin_ids", frozenset({777}))
+    await send_text("/admin")
+    await send_text("/stats")
+    assert not session.of(SendMessage)  # strangers get no answer at all
+    await press("adm:stats")
+    assert session.of(AnswerCallbackQuery)[-1].text == "⛔️"
+
+
+async def test_english_language(env):
+    session, db, send_text, press, _ = env
+    await press("l:en")
+    sent = session.of(SendMessage)[-1]
+    assert sent.text == "✅ Language: English"
+    assert sent.reply_markup.keyboard[0][0].text == "🔥 Top of the week"
+    await send_text("❓ Help")
+    assert "How it works" in session.of(SendMessage)[-1].text

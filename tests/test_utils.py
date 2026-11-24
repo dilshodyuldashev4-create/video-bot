@@ -83,3 +83,16 @@ def test_texts():
     for lang in ("ru", "uz"):
         assert "@x" in t(lang, "audio_footer", bot="x")
         assert "@x" in t(lang, "video_caption", icon="▶️", platform="YouTube", bot="x")
+
+
+def test_three_languages_have_the_same_keys():
+    from bot.texts import LANGS, TEXTS
+    assert set(LANGS) == set(TEXTS) == {"uz", "ru", "en"}
+    keys = set(TEXTS["ru"])
+    for lang, table in TEXTS.items():
+        assert set(table) == keys, lang
+
+
+def test_guess_lang_three():
+    assert guess_lang("uz") == "uz" and guess_lang("en-GB") == "en" and guess_lang("ru") == "ru"
+    assert guess_lang("de") == "ru"
