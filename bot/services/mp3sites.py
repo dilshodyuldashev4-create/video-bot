@@ -50,16 +50,17 @@ def _ydl(proxy: str | None, timeout: int = 20) -> yt_dlp.YoutubeDL:
     return yt_dlp.YoutubeDL(opts)
 
 
-def http_get(url: str, referer: str = "", timeout: int = 20) -> bytes:
-    """GET with direct -> proxy fallback. Raises the last error."""
-    headers = {"User-Agent": _UA, "Accept-Language": "ru,en;q=0.8"}
+def http_get(url: str, referer: str = "", timeout: int = 20, data: bytes | None = None,
+             headers: dict | None = None) -> bytes:
+    """GET (or POST when data is given) with direct -> proxy fallback. Raises the last error."""
+    headers = {"User-Agent": _UA, "Accept-Language": "ru,en;q=0.8"} | (headers or {})
     if referer:
         headers["Referer"] = referer
     last: Exception | None = None
     for proxy in [None, config.proxy] if config.proxy else [None]:
         try:
             with _ydl(proxy, timeout) as ydl:
-                with ydl.urlopen(Request(url, headers=headers)) as r:
+                with ydl.urlopen(Request(url, data=data, headers=headers)) as r:
                     return r.read()
         except Exception as e:  # noqa: BLE001
             last = e

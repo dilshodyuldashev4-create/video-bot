@@ -19,7 +19,7 @@ from aiogram.enums import ButtonStyle
 
 from ..config import config
 from ..db import DB
-from ..services import downloader, mp3sites, tiktok, ytalt
+from ..services import cobalt, downloader, mp3sites, tiktok, ytalt
 from ..texts import LANGS, LINE
 from ..utils import esc
 
@@ -308,6 +308,17 @@ async def diag_text() -> str:
             return f"✅ {esc(info.source)}"
         except Exception as e:  # noqa: BLE001
             return f"❌ {esc(str(e)[:300])}"
+    def cob() -> str:
+        try:
+            cobalt.reset_pause()
+            apis = cobalt.instances()
+            if not apis:
+                return "❌ нет публичных серверов"
+            cobalt.fetch("https://www.youtube.com/watch?v=jNQXAC9IVRw", audio=True)
+            return f"✅ {esc(cobalt._good[0])} (из {len(apis)})"
+        except Exception as e:  # noqa: BLE001
+            return f"❌ {esc(str(e)[:300])}"
+    lines.append(f"<b>YouTube через cobalt</b>: {await asyncio.to_thread(cob)}")
     lines.append(f"<b>YouTube через Invidious/Piped</b>: {await asyncio.to_thread(alt)}")
     def tt() -> str:
         try:

@@ -62,7 +62,7 @@ def test_no_proxy_configured_raises_original_error(monkeypatch):
     else:
         raise AssertionError("should raise")
     # default client, then the other player clients; then YouTube is paused
-    assert [c["client"] for c in FakeYDL.calls] == [None, ["tv_simply"], ["mweb"], ["web_safari"]]
+    assert [c["client"] for c in FakeYDL.calls] == [None, ["tv_simply"], ["web_embedded"], ["mweb"], ["web_safari"]]
     assert downloader.youtube_blocked()
 
 
@@ -81,7 +81,7 @@ def test_other_player_client_passes_bot_check(monkeypatch):
     monkeypatch.setattr(downloader.yt_dlp, "YoutubeDL", MwebWorks)
     opts = {"extractor_args": {"youtubepot-bgutilhttp": {"base_url": ["http://pot:4416"]}}}
     assert downloader._extract("https://youtu.be/U3kf72Zw3yA", opts)["title"] == "ok"
-    assert FakeYDL.calls == [None, ["tv_simply"], ["mweb"]]
+    assert FakeYDL.calls == [None, ["tv_simply"], ["web_embedded"], ["mweb"]]
     assert "youtube" not in opts["extractor_args"]  # caller's opts untouched
     assert not downloader.youtube_blocked()
 
