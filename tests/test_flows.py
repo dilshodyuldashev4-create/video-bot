@@ -137,7 +137,7 @@ async def test_search_list_paging_and_mp3(env, monkeypatch, fake_audio):
     assert fake_audio == ["id000000003"]
     assert audio.caption.startswith("🎧") and "@TestMusicBot" in audio.caption
     kb = audio.reply_markup.inline_keyboard
-    assert kb[0][0].callback_data == "lk" and kb[0][0].style == "danger"
+    assert kb[0][0].callback_data == "lk" and kb[0][0].style is None
     assert [b.callback_data for b in kb[0]] == ["lk", "ly"]
     assert [b.callback_data for b in kb[1]] == ["fx:up", "fx:slow"]
     assert [b.callback_data for b in kb[2]] == ["fx:8d", "fx:bass"]
@@ -976,3 +976,11 @@ async def test_ringtone_picks_the_loud_part(tmp_path):
                     "-af", "volume='if(lt(t,35),0.05,1)':eval=frame", "-c:a", "libmp3lame", str(src)], check=True)
     start = await media.best_part(src)
     assert 15 <= start <= 40
+
+
+def test_buttons_have_no_colors():
+    """The owner wants plain, transparent buttons everywhere."""
+    from bot import keyboards
+    for kb in (keyboards.audio_kb("b", "ru"), keyboards.audio_kb("b", "ru", liked=True), keyboards.results_kb(1, 25, 1),
+               keyboards.video_kb("t", "b", "ru"), keyboards.link_kb("t", "ru"), keyboards.mood_kb("ru")):
+        assert all(b.style is None for row in kb.inline_keyboard for b in row)
