@@ -62,3 +62,4 @@ def no_mp3_sites(monkeypatch):
     monkeypatch.setattr(cobalt, "instances", lambda: [])
     monkeypatch.setattr(cobalt, "_down_until", 0.0)
     monkeypatch.setattr(downloader, "_yt_blocked_until", 0.0)
+    downloader._search_cache.clear()

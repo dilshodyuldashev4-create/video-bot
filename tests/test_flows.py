@@ -75,10 +75,12 @@ async def env(data_dir):
     bot = Bot("1:test", session=session)
     db = DB(data_dir / "t.sqlite3")
     await db.connect()
-    from bot.handlers import admin, library, links, recognize, search, start
-    for r in (admin.router, library.router, links.router, recognize.router, search.router, start.router):
+    from bot.handlers import admin, inline, library, links, recognize, search, start
+    for r in (admin.router, inline.router, library.router, links.router, recognize.router, search.router,
+              start.router):
         r._parent_router = None  # allow a fresh Dispatcher per test
     dp = build_dispatcher(db)
+    session.dp, session.bot = dp, bot  # for tests that feed other update types
     counter = iter(range(1, 10_000))
 
     async def send_text(text):
@@ -136,8 +138,9 @@ async def test_search_list_paging_and_mp3(env, monkeypatch, fake_audio):
     assert audio.caption.startswith("🎧") and "@TestMusicBot" in audio.caption
     kb = audio.reply_markup.inline_keyboard
     assert kb[0][0].callback_data == "lk" and kb[0][0].style == "danger"
-    assert [b.callback_data for b in kb[1]] == ["fx:up", "fx:slow"]
-    assert kb[2][1].url == "https://t.me/TestMusicBot?startgroup=true"
+    assert [b.callback_data for b in kb[1]] == ["ly"]
+    assert [b.callback_data for b in kb[2]] == ["fx:up", "fx:slow"]
+    assert kb[3][1].url == "https://t.me/TestMusicBot?startgroup=true"
     assert "POP SMOKE" in audio.caption or "clip" in audio.caption
 
     # second time: sent instantly from the file_id cache, no new download
@@ -305,7 +308,7 @@ async def test_likes_and_my_music(env):
     from aiogram.methods import EditMessageReplyMarkup
     kb = session.of(EditMessageReplyMarkup)[-1].reply_markup
     assert kb.inline_keyboard[0][0].text == "💖 В избранном"
-    assert "t.me/share/url" in kb.inline_keyboard[2][0].url
+    assert "t.me/share/url" in kb.inline_keyboard[3][0].url
 
     await send_text("❤️ Моя музыка")  # reply-keyboard button
     lst = session.of(SendMessage)[-1]
@@ -751,3 +754,102 @@ async def test_youtube_blocked_video_and_audio_via_cobalt(env, monkeypatch, medi
     assert (audio.performer, audio.title) == ("UzBoom", "Kecholmadim")
     assert [k for k, _ in asked] == ["video", "audio"]
     assert not any("Не получилось" in (m.text or "") for m in session.of(SendMessage))
+
+
+async def test_sent_mp3_goes_to_library_and_is_found(env, monkeypatch):
+    """Someone sends an MP3 -> it is saved; anyone searching that song gets that exact file."""
+    session, db, send_text, press, send_media = env
+    await send_media(audio=Audio(file_id="USERMP3", file_unique_id="um1", duration=200,
+                                 performer="UzBoom", title="Kecholmadim"))
+    assert "добавлен в базу" in session.of(SendMessage)[-1].text
+
+    async def no_youtube(q, limit=30):
+        return []
+
+    monkeypatch.setattr(downloader, "search", no_youtube)
+    await send_text("kecholmadim")
+    edit = session.of(EditMessageText)[-1]
+    assert "UzBoom - Kecholmadim" in edit.text
+    sid = edit.reply_markup.inline_keyboard[0][0].callback_data.split(":")[1]
+    await press(f"t:{sid}:0")
+    assert session.of(SendAudio)[-1].audio == "USERMP3"
+
+    # Shazam finds the same song -> the library file is sent, nothing is downloaded
+    async def must_not_download(*a, **k):
+        raise AssertionError("should come from the library")
+
+    monkeypatch.setattr(downloader, "download_song", must_not_download)
+    from bot.common import send_song
+    n = len(session.of(SendAudio))
+    await send_song(session.bot, db, 42, "Kecholmadim", "UzBoom", "ru")
+    assert session.of(SendAudio)[-1].audio == "USERMP3" and len(session.of(SendAudio)) == n + 1
+
+
+async def test_lyrics_button(env, monkeypatch):
+    from bot.services import lyrics
+
+    session, _, _, press, _ = env
+    asked = []
+
+    def fake_find(title, artist):
+        asked.append((title, artist))
+        return "Ko'zlaring\nKecholmadim <3" if title == "Kecholmadim" else None
+
+    monkeypatch.setattr(lyrics, "find", fake_find)
+    msg = Message(message_id=600, date=NOW, chat=CHAT,
+                  audio=Audio(file_id="A", file_unique_id="a", duration=1, performer="UzBoom", title="Kecholmadim"))
+    await press("ly", message=msg)
+    text = session.of(SendMessage)[-1].text
+    assert "📝 <b>UzBoom - Kecholmadim</b>" in text and "Kecholmadim &lt;3" in text
+    await press("ly", message=msg)  # cached: no second lookup
+    assert asked == [("Kecholmadim", "UzBoom")]
+    other = Message(message_id=601, date=NOW, chat=CHAT,
+                    audio=Audio(file_id="B", file_unique_id="b", duration=1, performer="X", title="Nothing"))
+    await press("ly", message=other)
+    assert "не нашёл" in session.of(SendMessage)[-1].text
+
+
+async def test_inline_mode(env, monkeypatch, fake_audio):
+    from aiogram.methods import AnswerInlineQuery, EditMessageMedia
+    from aiogram.types import InlineQuery
+
+    session, db, send_text, press, _ = env
+    await db.add_to_library("lib1", "LIBFILE", "Dior", "Pop Smoke", 173)
+
+    async def fake_search(q, limit=30):
+        return [downloader.Track(id="oorVWW9ywG0", title="POP SMOKE - DIOR (OFFICIAL VIDEO)", duration=173)]
+
+    monkeypatch.setattr(downloader, "search", fake_search)
+    bot, dp = session.bot, session.dp
+    q = InlineQuery(id="iq1", from_user=USER, query="pop smoke dior", offset="").as_(bot)
+    await dp.feed_update(bot, Update(update_id=9001, inline_query=q).as_(bot))
+    answer = session.of(AnswerInlineQuery)[-1]
+    kinds = [r.type for r in answer.results]
+    assert kinds == ["audio", "article"]
+    assert answer.results[0].audio_file_id == "LIBFILE"
+    article = answer.results[1]
+    assert article.id == "y:oorVWW9ywG0" and "POP SMOKE - DIOR" in article.title
+
+    cq = CallbackQuery(id="c1", from_user=USER, chat_instance="c", data="il:oorVWW9ywG0",
+                       inline_message_id="INL1").as_(bot)
+    await dp.feed_update(bot, Update(update_id=9002, callback_query=cq).as_(bot))
+    edit = session.of(EditMessageMedia)[-1]
+    assert edit.inline_message_id == "INL1" and edit.media.media.startswith("AUD")
+    assert fake_audio == ["oorVWW9ywG0"]
+    assert session.of(DeleteMessage), "the helper upload in the user's chat is removed"
+
+
+async def test_group_link_downloads_without_menu(env, monkeypatch, http_base):
+    session, _, _, _, _ = env
+    real_dl = downloader.download_video
+
+    async def fake_video(url, platform):
+        return await real_dl(f"{http_base}/clip.mp4", platform)
+
+    monkeypatch.setattr(downloader, "download_video", fake_video)
+    bot, dp = session.bot, session.dp
+    group = Chat(id=-100500, type="supergroup", title="Friends")
+    msg = Message(message_id=77, date=NOW, chat=group, from_user=USER, text="look https://vt.tiktok.com/ZSq/").as_(bot)
+    await dp.feed_update(bot, Update(update_id=9100, message=msg).as_(bot))
+    assert session.of(SendVideo), "video sent straight away in groups"
+    assert not any(m.reply_markup and "dl:v:" in str(m.reply_markup) for m in session.of(SendMessage))

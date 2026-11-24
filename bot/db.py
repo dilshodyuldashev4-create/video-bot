@@ -1,5 +1,6 @@
 """Small SQLite store: users, admins, language, file_id cache, saved searches, likes, stats."""
 import json
+import re
 import time
 from pathlib import Path
 
@@ -37,11 +38,30 @@ CREATE TABLE IF NOT EXISTS admins (
     id INTEGER PRIMARY KEY,
     created INTEGER
 );
+CREATE TABLE IF NOT EXISTS library (
+    unique_id TEXT PRIMARY KEY,
+    file_id TEXT NOT NULL,
+    title TEXT,
+    performer TEXT,
+    duration INTEGER,
+    norm TEXT,
+    added_by INTEGER,
+    created INTEGER
+);
 CREATE TABLE IF NOT EXISTS stats (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL DEFAULT 0
 );
 """
+
+
+def norm_text(text: str) -> str:
+    """'Pop Smoke — DIOR (Official)' -> 'pop smoke dior official' (for library search)."""
+    return " ".join(re.findall(r"\w+", (text or "").lower().replace("ё", "е")))
+
+
+def _words(text: str) -> list[str]:
+    return [w for w in norm_text(text).split() if len(w) >= 2][:8]
 
 
 class DB:
@@ -227,3 +247,45 @@ class DB:
         async with self.conn.execute("SELECT value FROM stats WHERE name=?", (name,)) as cur:
             row = await cur.fetchone()
         return row[0] if row else 0
+
+    # music library: every MP3 users send or the bot sends, searchable by title / artist
+    async def add_to_library(self, unique_id: str, file_id: str, title: str, performer: str,
+                             duration: int, added_by: int | None = None) -> None:
+        if not (title or performer):
+            return
+        await self.conn.execute(
+            "INSERT INTO library(unique_id, file_id, title, performer, duration, norm, added_by, created) "
+            "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(unique_id) DO UPDATE SET file_id=excluded.file_id",
+            (unique_id, file_id, title or "", performer or "", duration or 0,
+             norm_text(f"{performer} {title}"), added_by, int(time.time())),
+        )
+        await self.conn.commit()
+
+    async def search_library(self, query: str, limit: int = 5) -> list[dict]:
+        """Tracks whose artist + title contain every word of the query."""
+        words = _words(query)
+        if not words:
+            return []
+        where = " AND ".join("(' ' || norm || ' ') LIKE ?" for _ in words)
+        args = [f"% {w}%" for w in words]
+        async with self.conn.execute(
+            f"SELECT file_id, title, performer, duration FROM library WHERE {where} "
+            f"ORDER BY length(norm) ASC, created DESC LIMIT ?", (*args, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [{"id": f"fid:{r[0]}", "title": f"{r[2]} - {r[1]}" if r[2] else r[1], "duration": r[3] or 0,
+                 "lib": True} for r in rows]
+
+    async def library_count(self) -> int:
+        return await self._scalar("SELECT COUNT(*) FROM library")
+
+    async def find_in_library(self, title: str, artist: str) -> dict | None:
+        """Exact-ish match for a known song (Shazam result, chart entry)."""
+        t_words = _words(title)
+        if not t_words:
+            return None
+        rows = await self.search_library(f"{artist} {title}", limit=1) if artist else []
+        if not rows:
+            rows = [r for r in await self.search_library(title, limit=10)
+                    if not artist or set(_words(artist)) & set(_words(r["title"]))]
+        return rows[0] if rows else None

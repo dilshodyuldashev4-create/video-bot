@@ -1,5 +1,6 @@
 """Shazam: video / audio / voice / video note -> song name -> MP3."""
 import logging
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -94,9 +95,41 @@ async def _finish_card(card: Message | None, text: str) -> None:
         pass
 
 
+def audio_tags(message: Message) -> tuple[str, str]:
+    """(performer, title) of a sent music file from its tags or 'Artist - Title.mp3' file name."""
+    a = message.audio
+    performer, title = (a.performer or "").strip(), (a.title or "").strip()
+    if not title:
+        stem = re.sub(r"\.(mp3|m4a|ogg|opus|flac|wav|aac)$", "", a.file_name or "", flags=re.I)
+        stem = re.sub(r"[_]+", " ", stem).strip()
+        artist, sep, name = stem.partition(" - ")
+        if sep and name.strip():
+            performer, title = performer or artist.strip(), name.strip()
+        elif stem and performer:
+            title = stem
+    return performer, title
+
+
+async def save_to_library(message: Message, db: DB) -> str | None:
+    """Store a sent song (with a real artist and title) in the library. Returns 'Artist - Title'."""
+    if not message.audio:
+        return None
+    performer, title = audio_tags(message)
+    if not (performer and title) or re.fullmatch(r"(audio|track|unknown|без названия)\s*\d*", title, re.I):
+        return None
+    await db.add_to_library(message.audio.file_unique_id, message.audio.file_id, title, performer,
+                            message.audio.duration or 0, message.from_user.id if message.from_user else None)
+    return f"{performer} - {title}"
+
+
 @router.message(F.chat.type == "private", MEDIA)
 async def on_media(message: Message, bot: Bot, db: DB, lang: str) -> None:
     f = _file_of(message)
+    if name := await save_to_library(message, db):
+        # a tagged MP3: it goes straight into the bot's library, no need to Shazam it
+        await react(message, "🔥")
+        await message.reply(t(lang, "lib_added", name=esc(name)))
+        return
     async with user_lock(message.from_user.id) as ok:
         if not ok:
             await message.reply(t(lang, "busy"))
@@ -111,6 +144,9 @@ async def on_media(message: Message, bot: Bot, db: DB, lang: str) -> None:
                 await message.reply(t(lang, "file_too_big"))
                 return
             song = await recognizer.recognize(path)
+            if song and message.audio:  # an untagged MP3: keep it in the library under its real name
+                await db.add_to_library(message.audio.file_unique_id, message.audio.file_id, song.title,
+                                        song.artist, message.audio.duration or 0, message.from_user.id)
             hint = ""
             if message.audio and not song and message.audio.title:
                 hint = f"{message.audio.performer or ''} - {message.audio.title}".strip(" -")

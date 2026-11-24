@@ -55,7 +55,7 @@ def video_caption(lang: str, username: str, platform: str) -> str:
     return t(lang, "video_caption", icon=icon, platform=name, bot=username)
 
 
-@router.message(F.text.regexp(URL_RE) | F.caption.regexp(URL_RE))
+@router.message(F.text.regexp(URL_RE, mode="search") | F.caption.regexp(URL_RE, mode="search"))
 async def on_link(message: Message, bot: Bot, db: DB, lang: str) -> None:
     """A link: ask what to download (video / audio / find the music)."""
     url = extract_url(message.text or message.caption)
@@ -63,6 +63,13 @@ async def on_link(message: Message, bot: Bot, db: DB, lang: str) -> None:
     if not platform:
         if message.chat.type == "private":
             await message.reply(t(lang, "unsupported_link"))
+        return
+    if message.chat.type != "private":
+        # groups: no menu, the video is downloaded straight away for everyone in the chat
+        await react(message, "👀")
+        done = await run_link(message, bot, db, lang, message.from_user.id if message.from_user else message.chat.id,
+                              url, platform, "v", quiet_busy=True)
+        await react(message, "🔥" if done else "😢")
         return
     token = uuid.uuid4().hex[:16]
     await db.put_file(f"lnk:{token}", "link", url, {"platform": platform})
@@ -84,12 +91,18 @@ async def cb_link(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
         await call.answer(t(lang, "link_expired"), show_alert=True)
         return
     url, platform = link
-    message = call.message
-    async with user_lock(call.from_user.id) as ok:
+    await call.answer("🎬" if mode == "v" else "🎵")
+    await run_link(call.message, bot, db, lang, call.from_user.id, url, platform, mode)
+
+
+async def run_link(message: Message, bot: Bot, db: DB, lang: str, user_id: int, url: str, platform: str,
+                   mode: str, quiet_busy: bool = False) -> bool:
+    """Download a link as video ("v") or audio ("a") into message's chat. True on success."""
+    async with user_lock(user_id) as ok:
         if not ok:
-            await call.answer(t(lang, "busy"))
-            return
-        await call.answer("🎬" if mode == "v" else "🎵")
+            if not quiet_busy:
+                await message.answer(t(lang, "busy"))
+            return False
         username = await bot_username(bot)
         status = await message.answer(t(lang, "downloading"))
         try:
@@ -97,6 +110,7 @@ async def cb_link(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
                 await _handle(message, bot, db, lang, username, url, platform)
             else:
                 await send_link_audio(bot, db, message.chat.id, lang, url, platform)
+            return True
         except downloader.TooBig:
             await message.answer(t(lang, "too_big"))
         except downloader.DownloadFailed:
@@ -110,6 +124,7 @@ async def cb_link(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
                 await status.delete()
             except TelegramBadRequest:
                 pass
+        return False
 
 
 async def send_link_audio(bot: Bot, db: DB, chat_id: int, lang: str, url: str, platform: str) -> Message:

@@ -33,7 +33,7 @@ class Config:
     yt_proxy: str = field(default_factory=lambda: os.getenv("YT_PROXY_URL", "").strip())
     # bgutil PO-token provider for YouTube (docker-compose: pot-provider service)
     pot_url: str = field(default_factory=lambda: os.getenv("POT_PROVIDER_URL", "").strip().rstrip("/"))
-    max_parallel: int = field(default_factory=lambda: _int("MAX_PARALLEL_DOWNLOADS", 4))
+    max_parallel: int = field(default_factory=lambda: _int("MAX_PARALLEL_DOWNLOADS", 8))
     max_height: int = field(default_factory=lambda: _int("MAX_VIDEO_HEIGHT", 1080))
     data_dir: Path = field(default_factory=lambda: Path(os.getenv("DATA_DIR", "./data")).resolve())
 

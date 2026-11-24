@@ -1,4 +1,5 @@
-"""❤️ likes and "My music", 🔥 charts, ⚡ speed up / 🌙 slowed + reverb."""
+"""❤️ likes and "My music", 🔥 charts, ⚡ speed up / 🌙 slowed + reverb, 📝 lyrics."""
+import asyncio
 import logging
 import shutil
 import uuid
@@ -10,10 +11,11 @@ from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from ..common import audio_caption, bot_username, react, user_lock
 from ..config import config
-from ..db import DB
+from ..db import DB, norm_text
 from ..keyboards import audio_kb, results_kb, results_text
-from ..services import charts, media
-from ..texts import menu_labels, t
+from ..services import charts, lyrics, media
+from ..texts import LINE, menu_labels, t
+from ..utils import esc
 
 log = logging.getLogger(__name__)
 router = Router(name="library")
@@ -58,13 +60,13 @@ async def cmd_my_music(message: Message, db: DB, lang: str) -> None:
                          reply_markup=results_kb(sid, len(likes), 0))
 
 
-async def send_liked(bot: Bot, chat_id: int, item: dict, lang: str) -> None:
+async def send_liked(bot: Bot, chat_id: int, item: dict, lang: str, liked: bool = True) -> None:
     username = await bot_username(bot)
     performer, _, title = item["title"].partition(" - ")
     if not title:
         performer, title = "", item["title"]
     await bot.send_audio(chat_id, item["id"][4:], caption=audio_caption(lang, username, title, performer),
-                         reply_markup=audio_kb(username, lang, liked=True))
+                         reply_markup=audio_kb(username, lang, liked=liked))
 
 
 # ---------------------------------------------------------------- charts
@@ -155,3 +157,47 @@ async def cb_fx(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
                 await status.delete()
             except TelegramBadRequest:
                 pass
+
+
+# ---------------------------------------------------------------- lyrics
+
+def _lyric_chunks(text: str, size: int = 3800) -> list[str]:
+    chunks, cur = [], ""
+    for block in text.split("\n"):
+        if len(cur) + len(block) + 1 > size:
+            chunks.append(cur)
+            cur = ""
+        cur += block + "\n"
+    if cur.strip():
+        chunks.append(cur)
+    return chunks or [text[:size]]
+
+
+@router.callback_query(F.data == "ly")
+async def cb_lyrics(call: CallbackQuery, db: DB, lang: str) -> None:
+    """📝 under an MP3: the song's lyrics."""
+    audio = call.message.audio if call.message else None
+    if not audio:
+        await call.answer("😔", show_alert=False)
+        return
+    performer, title = (audio.performer or "").strip(), (audio.title or "").strip()
+    if not title and audio.file_name:
+        performer, _, title = audio.file_name.rsplit(".", 1)[0].partition(" - ")
+        if not title:
+            performer, title = "", performer
+    name = f"{performer} - {title}" if performer else title
+    await call.answer("📝")
+    key = "ly:" + norm_text(name)[:200]
+    cached = await db.get_file(key)
+    text = cached[2].get("text") if cached else None
+    if not text:
+        text = await asyncio.to_thread(lyrics.find, title, performer)
+        if text:
+            await db.put_file(key, "lyrics", "-", {"text": text})
+    if not text:
+        await call.message.reply(t(lang, "lyrics_none", name=esc(name)))
+        return
+    chunks = _lyric_chunks(esc(text))
+    head = t(lang, "lyrics_title", name=esc(name)) + "\n" + LINE + "\n"
+    for i, chunk in enumerate(chunks):
+        await call.message.reply((head if i == 0 else "") + chunk)

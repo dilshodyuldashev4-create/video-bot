@@ -24,13 +24,14 @@ async def on_text(message: Message, db: DB, lang: str) -> None:
         return
     await react(message, "👀")
     status = await message.answer(t(lang, "searching"))
-    tracks = await downloader.search(query, limit=30)
-    if not tracks:
+    lib = await db.search_library(query, limit=5)  # songs people sent to the bot come first
+    tracks = await downloader.search(query, limit=30 - len(lib))
+    if not tracks and not lib:
         await status.edit_text(t(lang, "nothing_found", q=esc(query)))
         await react(message, "🙈")
         return
     await react(message, "🔥")
-    results = [tr.as_dict() for tr in tracks]
+    results = lib + [tr.as_dict() for tr in tracks]
     sid = await db.save_search(query, results)
     await status.edit_text(results_text(query, results, 0, lang), reply_markup=results_kb(sid, len(results), 0))
 
@@ -63,7 +64,7 @@ async def cb_track(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
     track = found[1][int(idx)]
     if track["id"].startswith("fid:"):  # from "My music": already on Telegram, instant
         await call.answer()
-        await send_liked(bot, call.message.chat.id, track, lang)
+        await send_liked(bot, call.message.chat.id, track, lang, liked=not track.get("lib"))
         return
     async with user_lock(call.from_user.id) as ok:
         if not ok:
