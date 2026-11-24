@@ -82,6 +82,7 @@ async def _send_cached(bot: Bot, db: DB, key: str, chat_id: int, lang: str, user
         return None
     meta = cached[2]
     caption = audio_caption(lang, username, meta.get("title", ""), meta.get("performer", ""), header)
+    await db.log_play(chat_id, meta.get("title", ""), meta.get("performer", ""))
     try:
         return await bot.send_audio(chat_id, cached[1], caption=caption, reply_markup=audio_kb(username, lang),
                                     reply_to_message_id=reply_to)
@@ -99,6 +100,7 @@ async def _send_fresh(bot: Bot, db: DB, key: str, chat_id: int, lang: str, usern
         await db.add_to_library(msg.audio.file_unique_id, msg.audio.file_id, audio.title, audio.performer,
                                 audio.duration)
     await db.incr("downloads")
+    await db.log_play(chat_id, audio.title, audio.performer)
     return msg
 
 
@@ -132,6 +134,7 @@ async def send_song(bot: Bot, db: DB, chat_id: int, title: str, artist: str, lan
     if msg := await _send_cached(bot, db, key, chat_id, lang, username, header, reply_to):
         return msg
     if found := await db.find_in_library(title, artist):  # someone already sent / got this song
+        await db.log_play(chat_id, title, artist)
         try:
             return await bot.send_audio(chat_id, found["id"][4:], caption=audio_caption(lang, username, title, artist, header),
                                         reply_markup=audio_kb(username, lang), reply_to_message_id=reply_to)

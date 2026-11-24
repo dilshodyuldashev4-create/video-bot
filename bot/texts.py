@@ -24,7 +24,10 @@ TEXTS: dict[str, dict[str, str]] = {
             "🎵 Под видео жмёшь «Скачать песню» → бот найдёт трек из видео\n"
             "🔍 Скидываешь видео / аудио / голосовое → Shazam узнаёт песню\n"
             "❤️ Жмёшь «В избранное» → трек в твоём плейлисте /mymusic\n"
-            "⚡ / 🌙 Под любым MP3 → speed up или slowed + reverb версия\n"
+            "⚡ / 🌙 / 🎧 / 🔊 Под любым MP3 → speed up, slowed, 8D или bass boost\n"
+            "🎤 Минус → песня без голоса · 🔔 Рингтон для iPhone и Android\n"
+            "⭕ Видео → кружок или голосовое · 📝 Текст песни\n"
+            "🎧 Настроение → подборка под вайб · 📊 Мой год → итоги (/wrapped)\n"
             "🔥 Меню → топ недели, топ Узбекистана и России (/top)\n"
             f"{LINE}\n"
             "👥 Добавь бота в группу, и он будет качать ссылки прямо в чат"
@@ -51,6 +54,27 @@ TEXTS: dict[str, dict[str, str]] = {
         "inline_loading": "⏳ Загружаю…",
         "inline_open": "🎧 Открыть бота",
         "inline_hint": "Напиши название песни или исполнителя",
+        "btn_8d": "🎧 8D",
+        "btn_bass": "🔊 Bass boost",
+        "btn_minus": "🎤 Минусовка",
+        "btn_ringtone": "🔔 Рингтон",
+        "fx_header_8d": "🎧 <b>8D</b> версия (слушай в наушниках)",
+        "fx_header_bass": "🔊 <b>Bass boost</b> версия",
+        "fx_header_minus": "🎤 <b>Минусовка</b> (караоке-версия)",
+        "minus_mono": "😔 Этот трек записан в моно, голос отделить не получится.",
+        "ringtone_caption": "🔔 <b>Рингтон</b>: {name}\n" + LINE + "\n📱 iPhone: файл .m4r → Поделиться → GarageBand → Рингтон\n🤖 Android: файл .mp3 → Настройки → Звук → Рингтон",
+        "btn_note": "⭕ В кружок",
+        "btn_voice": "🎙 В голосовое",
+        "video_more": "🎬 Ещё можно сделать из этого видео 👇",
+        "menu_mood": "🎧 Настроение",
+        "mood_pick": "🎧 <b>Музыка по настроению</b>\n" + LINE + "\nВыбери, что сейчас нужно 👇",
+        "mood_sad": "😢 Грустное", "mood_car": "🚗 Для машины", "mood_gym": "🏋️ Для зала",
+        "mood_toy": "💃 Для тоя", "mood_chill": "😌 Спокойное", "mood_love": "❤️ Про любовь",
+        "menu_wrapped": "📊 Мой {year}",
+        "wrapped_empty": "📊 Пока мало данных. Скачай несколько песен, и я соберу твои итоги года!",
+        "wrapped_caption": "📊 <b>Твой {year}</b> с @{bot}\n" + LINE + "\nПоделись с друзьями 👇",
+        "wr_title": "Твой {year}", "wr_tracks": "треков скачано", "wr_artists": "Любимые исполнители",
+        "wr_songs": "Топ песни", "wr_days": "дней с музыкой",
         "btn_add_group": "➕ В группу",
         "btn_share": "🔗 Поделиться",
         "btn_like": "❤️ В избранное",
@@ -109,7 +133,10 @@ TEXTS: dict[str, dict[str, str]] = {
             "🎵 Video ostidagi «Qo'shiqni yuklab olish» → videodagi trekni topadi\n"
             "🔍 Video / audio / ovozli xabar yuboring → Shazam qo'shiqni aniqlaydi\n"
             "❤️ «Sevimlilarga» bosing → trek /mymusic pleylistingizda\n"
-            "⚡ / 🌙 Istalgan MP3 ostida → speed up yoki slowed + reverb versiya\n"
+            "⚡ / 🌙 / 🎧 / 🔊 Istalgan MP3 ostida → speed up, slowed, 8D yoki bass boost\n"
+            "🎤 Minus → ovozsiz qo'shiq · 🔔 iPhone va Android uchun rington\n"
+            "⭕ Video → dumaloq video yoki ovozli xabar · 📝 Qo'shiq matni\n"
+            "🎧 Kayfiyat → vaybga mos tanlov · 📊 Mening yilim → yakunlar (/wrapped)\n"
             "🔥 Menyu → hafta topi, O'zbekiston va Rossiya topi (/top)\n"
             f"{LINE}\n"
             "👥 Botni guruhga qo'shing — havolalarni to'g'ridan-to'g'ri chatga yuklaydi"
@@ -136,6 +163,27 @@ TEXTS: dict[str, dict[str, str]] = {
         "inline_loading": "⏳ Yuklanmoqda…",
         "inline_open": "🎧 Botni ochish",
         "inline_hint": "Qo'shiq yoki ijrochi nomini yozing",
+        "btn_8d": "🎧 8D",
+        "btn_bass": "🔊 Bass boost",
+        "btn_minus": "🎤 Minus",
+        "btn_ringtone": "🔔 Rington",
+        "fx_header_8d": "🎧 <b>8D</b> versiya (quloqchinda tinglang)",
+        "fx_header_bass": "🔊 <b>Bass boost</b> versiya",
+        "fx_header_minus": "🎤 <b>Minus</b> (karaoke versiya)",
+        "minus_mono": "😔 Bu trek mono yozilgan, ovozni ajratib bo'lmaydi.",
+        "ringtone_caption": "🔔 <b>Rington</b>: {name}\n" + LINE + "\n📱 iPhone: .m4r fayl → Ulashish → GarageBand → Rington\n🤖 Android: .mp3 fayl → Sozlamalar → Ovoz → Rington",
+        "btn_note": "⭕ Dumaloq video",
+        "btn_voice": "🎙 Ovozli xabar",
+        "video_more": "🎬 Bu videodan yana nima qilamiz 👇",
+        "menu_mood": "🎧 Kayfiyat",
+        "mood_pick": "🎧 <b>Kayfiyatga mos musiqa</b>\n" + LINE + "\nHozir nima kerak, tanlang 👇",
+        "mood_sad": "😢 G'amgin", "mood_car": "🚗 Mashinaga", "mood_gym": "🏋️ Sport zalga",
+        "mood_toy": "💃 To'yga", "mood_chill": "😌 Sokin", "mood_love": "❤️ Sevgi haqida",
+        "menu_wrapped": "📊 Mening {year}",
+        "wrapped_empty": "📊 Hozircha ma'lumot kam. Bir nechta qo'shiq yuklab oling, men yilingiz yakunini tayyorlayman!",
+        "wrapped_caption": "📊 <b>Sizning {year}</b> @{bot} bilan\n" + LINE + "\nDo'stlaringizga ulashing 👇",
+        "wr_title": "Sizning {year}", "wr_tracks": "ta trek yuklandi", "wr_artists": "Sevimli ijrochilar",
+        "wr_songs": "Top qo'shiqlar", "wr_days": "kun musiqa bilan",
         "btn_add_group": "➕ Guruhga qo'shish",
         "btn_share": "🔗 Ulashish",
         "btn_like": "❤️ Sevimlilarga",
@@ -194,7 +242,10 @@ TEXTS: dict[str, dict[str, str]] = {
             "🎵 Tap «Get the song» under a video → the bot finds the track from it\n"
             "🔍 Send a video / audio / voice → Shazam names the song\n"
             "❤️ Tap «Add to favorites» → the track goes to /mymusic\n"
-            "⚡ / 🌙 Under any MP3 → speed up or slowed + reverb version\n"
+            "⚡ / 🌙 / 🎧 / 🔊 Under any MP3 → speed up, slowed, 8D or bass boost\n"
+            "🎤 Minus → the song without vocals · 🔔 Ringtone for iPhone and Android\n"
+            "⭕ Video → video note or voice message · 📝 Lyrics\n"
+            "🎧 Mood → a playlist for your vibe · 📊 My year → your stats (/wrapped)\n"
             "🔥 Menu → top of the week, Uzbekistan and Russia charts (/top)\n"
             f"{LINE}\n"
             "👥 Add the bot to a group and it will download links right in the chat"
@@ -221,6 +272,27 @@ TEXTS: dict[str, dict[str, str]] = {
         "inline_loading": "⏳ Loading…",
         "inline_open": "🎧 Open the bot",
         "inline_hint": "Type a song or artist name",
+        "btn_8d": "🎧 8D",
+        "btn_bass": "🔊 Bass boost",
+        "btn_minus": "🎤 Instrumental",
+        "btn_ringtone": "🔔 Ringtone",
+        "fx_header_8d": "🎧 <b>8D</b> version (use headphones)",
+        "fx_header_bass": "🔊 <b>Bass boost</b> version",
+        "fx_header_minus": "🎤 <b>Instrumental</b> (karaoke version)",
+        "minus_mono": "😔 This track is mono, the vocals can't be separated.",
+        "ringtone_caption": "🔔 <b>Ringtone</b>: {name}\n" + LINE + "\n📱 iPhone: .m4r file → Share → GarageBand → Ringtone\n🤖 Android: .mp3 file → Settings → Sound → Ringtone",
+        "btn_note": "⭕ Video note",
+        "btn_voice": "🎙 Voice message",
+        "video_more": "🎬 More things to do with this video 👇",
+        "menu_mood": "🎧 Mood",
+        "mood_pick": "🎧 <b>Music for your mood</b>\n" + LINE + "\nPick what you need now 👇",
+        "mood_sad": "😢 Sad", "mood_car": "🚗 Car", "mood_gym": "🏋️ Gym",
+        "mood_toy": "💃 Party / wedding", "mood_chill": "😌 Chill", "mood_love": "❤️ Love",
+        "menu_wrapped": "📊 My {year}",
+        "wrapped_empty": "📊 Not enough data yet. Download a few songs and I'll make your year in music!",
+        "wrapped_caption": "📊 <b>Your {year}</b> with @{bot}\n" + LINE + "\nShare it with friends 👇",
+        "wr_title": "Your {year}", "wr_tracks": "tracks downloaded", "wr_artists": "Top artists",
+        "wr_songs": "Top songs", "wr_days": "days with music",
         "btn_add_group": "➕ Add to group",
         "btn_share": "🔗 Share",
         "btn_like": "❤️ Add to favorites",

@@ -75,9 +75,9 @@ async def env(data_dir):
     bot = Bot("1:test", session=session)
     db = DB(data_dir / "t.sqlite3")
     await db.connect()
-    from bot.handlers import admin, inline, library, links, recognize, search, start
+    from bot.handlers import admin, inline, library, links, recognize, search, start, tools
     for r in (admin.router, inline.router, library.router, links.router, recognize.router, search.router,
-              start.router):
+              start.router, tools.router):
         r._parent_router = None  # allow a fresh Dispatcher per test
     dp = build_dispatcher(db)
     session.dp, session.bot = dp, bot  # for tests that feed other update types
@@ -138,9 +138,11 @@ async def test_search_list_paging_and_mp3(env, monkeypatch, fake_audio):
     assert audio.caption.startswith("🎧") and "@TestMusicBot" in audio.caption
     kb = audio.reply_markup.inline_keyboard
     assert kb[0][0].callback_data == "lk" and kb[0][0].style == "danger"
-    assert [b.callback_data for b in kb[1]] == ["ly"]
-    assert [b.callback_data for b in kb[2]] == ["fx:up", "fx:slow"]
-    assert kb[3][1].url == "https://t.me/TestMusicBot?startgroup=true"
+    assert [b.callback_data for b in kb[0]] == ["lk", "ly"]
+    assert [b.callback_data for b in kb[1]] == ["fx:up", "fx:slow"]
+    assert [b.callback_data for b in kb[2]] == ["fx:8d", "fx:bass"]
+    assert [b.callback_data for b in kb[3]] == ["fx:minus", "rt"]
+    assert kb[4][1].url == "https://t.me/TestMusicBot?startgroup=true"
     assert "POP SMOKE" in audio.caption or "clip" in audio.caption
 
     # second time: sent instantly from the file_id cache, no new download
@@ -228,7 +230,9 @@ async def test_voice_recognition_and_failure(env, monkeypatch, media_dir, fake_a
     monkeypatch.setattr(rec_handler, "_fetch", fake_fetch)
     monkeypatch.setattr(recognizer, "recognize", lambda p: _async(None))
     await send_media(video=Video(file_id="x", file_unique_id="u", width=1, height=1, duration=30))
-    assert "Не смог узнать" in session.of(SendMessage)[-1].text
+    texts = [m.text for m in session.of(SendMessage)]
+    assert any("Не смог узнать" in x for x in texts)
+    assert session.of(SendMessage)[-1].reply_markup.inline_keyboard[0][0].callback_data.startswith("vn:note:")
 
     monkeypatch.setattr(recognizer, "recognize", lambda p: _async(recognizer.Song("Dior", "Pop Smoke")))
     monkeypatch.setattr(downloader, "search", lambda q, limit=30: _async([downloader.Track(id="abc", title="Dior")]))
@@ -244,7 +248,7 @@ async def test_language_switch(env):
     sent = session.of(SendMessage)[-1]
     assert "O'zbekcha" in sent.text
     assert sent.reply_markup.keyboard[0][0].text == "🔥 Hafta topi"
-    assert sent.reply_markup.keyboard[1][0].text == "❤️ Mening musiqam"
+    assert sent.reply_markup.keyboard[1][1].text == "❤️ Mening musiqam"
     await send_text("/start")
     assert "Salom" in session.of(SendMessage)[-1].text
 
@@ -308,7 +312,7 @@ async def test_likes_and_my_music(env):
     from aiogram.methods import EditMessageReplyMarkup
     kb = session.of(EditMessageReplyMarkup)[-1].reply_markup
     assert kb.inline_keyboard[0][0].text == "💖 В избранном"
-    assert "t.me/share/url" in kb.inline_keyboard[3][0].url
+    assert "t.me/share/url" in kb.inline_keyboard[4][0].url
 
     await send_text("❤️ Моя музыка")  # reply-keyboard button
     lst = session.of(SendMessage)[-1]
@@ -853,3 +857,122 @@ async def test_group_link_downloads_without_menu(env, monkeypatch, http_base):
     await dp.feed_update(bot, Update(update_id=9100, message=msg).as_(bot))
     assert session.of(SendVideo), "video sent straight away in groups"
     assert not any(m.reply_markup and "dl:v:" in str(m.reply_markup) for m in session.of(SendMessage))
+
+
+# ---------------------------------------------------------------- ringtone, video note, mood, wrapped
+
+@pytest.fixture
+def stereo_mp3(tmp_path) -> Path:
+    out = tmp_path / "stereo.mp3"
+    subprocess.run([
+        "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=45",
+        "-f", "lavfi", "-i", "sine=frequency=660:duration=45",
+        "-filter_complex", "[0][1]amerge=inputs=2,pan=stereo|c0=c0+0.5*c1|c1=c0+0.2*c1",
+        "-c:a", "libmp3lame", "-b:a", "128k", str(out)], check=True)
+    return out
+
+
+def _fake_download(monkeypatch, src: Path):
+    async def fake(self, file, destination=None, **kw):
+        shutil.copy(src, destination)
+        return destination
+
+    monkeypatch.setattr(Bot, "download", fake)
+
+
+def _probe(path: Path) -> dict:
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_name,width,height,channels:"
+                          "format=duration,format_name", "-of", "json", str(path)], capture_output=True, check=True)
+    return json.loads(out.stdout)
+
+
+async def test_media_minus_ringtone_note_voice(tmp_path, stereo_mp3, media_dir):
+    from bot.services import media
+    assert await media.make_minus(stereo_mp3, tmp_path / "minus.mp3")
+    assert await media.make_minus(media_dir / "clip.mp4", tmp_path / "mono.mp3") is None  # mono: nothing to cancel
+    for mode in ("8d", "bass"):
+        assert await media.make_fx(stereo_mp3, tmp_path / f"{mode}.mp3", mode)
+
+    m4r, mp3 = await media.make_ringtone(stereo_mp3, tmp_path, "Artist - Song")
+    assert m4r.suffix == ".m4r" and mp3.suffix == ".mp3"
+    info = _probe(m4r)
+    assert info["streams"][0]["codec_name"] == "aac" and 29 <= float(info["format"]["duration"]) <= 31
+
+    note = await media.to_video_note(media_dir / "clip.mp4", tmp_path / "note.mp4")
+    v = [s for s in _probe(note)["streams"] if s.get("width")][0]
+    assert v["width"] == v["height"] == 512
+    voice = await media.to_voice(media_dir / "clip.mp4", tmp_path / "voice.ogg")
+    assert _probe(voice)["streams"][0]["codec_name"] == "opus"
+
+
+async def test_ringtone_button(env, monkeypatch, stereo_mp3):
+    from aiogram.methods import SendDocument
+    session, _, _, press, _ = env
+    _fake_download(monkeypatch, stereo_mp3)
+    msg = Message(message_id=5, date=NOW, chat=CHAT,
+                  audio=Audio(file_id="A", file_unique_id="ua", duration=45, title="Dior", performer="Pop Smoke"))
+    await press("rt", message=msg)
+    docs = session.of(SendDocument)
+    assert [d.document.filename for d in docs] == ["Pop Smoke - Dior.m4r", "Pop Smoke - Dior.mp3"]
+    assert "Рингтон" in docs[-1].caption
+
+
+async def test_video_note_and_voice(env, monkeypatch, media_dir):
+    from aiogram.methods import SendVideoNote, SendVoice
+    session, db, _, press, _ = env
+    _fake_download(monkeypatch, media_dir / "clip.mp4")
+    video = Video(file_id="V", file_unique_id="uv", width=720, height=1280, duration=30, file_size=100_000)
+    await press("vn:note", message=Message(message_id=6, date=NOW, chat=CHAT, video=video))
+    assert len(session.of(SendVideoNote)) == 1
+    await db.put_file("uv:tok", "video", "V", {"size": 100_000})
+    await press("vn:voice:tok")
+    assert len(session.of(SendVoice)) == 1
+    await press("vn:voice:gone")
+    assert session.of(AnswerCallbackQuery)[-1].show_alert
+
+
+async def test_mood_playlist(env, monkeypatch):
+    session, db, send_text, press, _ = env
+    queries = []
+
+    async def fake_search(q, limit=30):
+        queries.append(q)
+        return [downloader.Track(id=f"{len(queries)}x{i:08d}", title=f"{q} {i}", duration=200) for i in range(3)]
+
+    monkeypatch.setattr(downloader, "search", fake_search)
+    await send_text("🎧 Настроение")
+    kb = session.of(SendMessage)[-1].reply_markup.inline_keyboard
+    assert kb[0][0].callback_data == "mood:sad"
+    await press("mood:sad")
+    assert len(queries) == 2 and all(str(NOW.year) in q for q in queries)
+    text = session.of(EditMessageText)[-1].text
+    assert "Грустное" in text and "1." in text
+
+
+async def test_wrapped_card(env, tmp_path):
+    session, db, send_text, _, _ = env
+    await send_text(f"📊 Мой {NOW.year}")
+    assert "мало данных" in session.of(SendMessage)[-1].text
+    for title, artist in [("Dior", "Pop Smoke"), ("Dior", "Pop Smoke"), ("Welcome", "Pop Smoke"), ("Yor", "Shahzoda")]:
+        await db.log_play(USER.id, title, artist)
+    stats = await db.year_stats(USER.id, NOW.year)
+    assert stats["total"] == 4 and stats["days"] == 1
+    assert stats["artists"][0] == ("Pop Smoke", 3) and stats["songs"][0][:2] == ("Dior", "Pop Smoke")
+    await send_text("/wrapped")
+    photo = session.of(SendPhoto)[-1]
+    assert f"{NOW.year}" in photo.caption and photo.photo.filename.endswith(".png")
+
+    from PIL import Image
+    from bot.services import wrapped
+    out = wrapped.render(stats, {"title": "Твой 2026", "tracks": "треков", "days": "дней", "artists": "Артисты",
+                                 "songs": "Песни"}, "TestMusicBot", tmp_path / "w.png")
+    assert Image.open(out).size == (1080, 1350)
+
+
+async def test_ringtone_picks_the_loud_part(tmp_path):
+    from bot.services import media
+    src = tmp_path / "quiet_loud.mp3"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=70",
+                    "-af", "volume='if(lt(t,35),0.05,1)':eval=frame", "-c:a", "libmp3lame", str(src)], check=True)
+    start = await media.best_part(src)
+    assert 15 <= start <= 40

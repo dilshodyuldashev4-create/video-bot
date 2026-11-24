@@ -95,7 +95,11 @@ async def cmd_chart(message: Message, db: DB, lang: str) -> None:
 
 # ---------------------------------------------------------------- speed up / slowed + reverb
 
-@router.callback_query(F.data.in_({"fx:up", "fx:slow"}))
+FX_SUFFIX = {"up": "(sped up)", "slow": "(slowed + reverb)", "8d": "(8D audio)", "bass": "(bass boosted)",
+             "minus": "(instrumental)"}
+
+
+@router.callback_query(F.data.in_({f"fx:{m}" for m in FX_SUFFIX}))
 async def cb_fx(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
     audio = call.message.audio if call.message else None
     if not audio:
@@ -104,7 +108,7 @@ async def cb_fx(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
     mode = call.data.split(":", 1)[1]
     username = await bot_username(bot)
     header = t(lang, f"fx_header_{mode}")
-    suffix = "(sped up)" if mode == "up" else "(slowed + reverb)"
+    suffix = FX_SUFFIX[mode]
     title = f"{audio.title or audio.file_name or 'track'} {suffix}"
     caption = audio_caption(lang, username, title, audio.performer or "", header)
     kb = audio_kb(username, lang)
@@ -133,7 +137,13 @@ async def cb_fx(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
                 return
             src = work / "src.mp3"
             await bot.download(audio.file_id, destination=src, timeout=600)
-            out = await media.make_fx(src, work / "out.mp3", mode)
+            if mode == "minus":
+                out = await media.make_minus(src, work / "out.mp3")
+                if not out:
+                    await call.message.answer(t(lang, "minus_mono"))
+                    return
+            else:
+                out = await media.make_fx(src, work / "out.mp3", mode)
             if not out:
                 await call.message.answer(t(lang, "error"))
                 return
