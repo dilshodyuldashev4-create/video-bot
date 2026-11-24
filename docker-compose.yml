@@ -9,9 +9,12 @@ services:
       PROXY_URL: ${PROXY_URL:-socks5://warp:1080}
       # Генератор PO-токенов для YouTube (снижает "Sign in to confirm you're not a bot")
       POT_PROVIDER_URL: ${POT_PROVIDER_URL:-http://pot-provider:4416}
+      # Мини-приложение (плеер): бесплатная HTTPS-ссылка через Cloudflare, бот сам её узнаёт
+      TUNNEL_METRICS_URL: ${TUNNEL_METRICS_URL:-http://cloudflared:2000}
     depends_on:
       - warp
       - pot-provider
+      - cloudflared
     volumes:
       - ./data:/app/data
       # - ./cookies.txt:/app/cookies.txt:ro      # если нужен Instagram/YouTube с cookies
@@ -34,6 +37,14 @@ services:
       WARP_SLEEP: "2"
     volumes:
       - warp-data:/var/lib/cloudflare-warp
+
+  # Бесплатный HTTPS-адрес для мини-приложения (Cloudflare quick tunnel, без аккаунта).
+  # Бот читает адрес https://….trycloudflare.com сам и ставит его на кнопку «🎧 Плеер».
+  # Свой домен: укажите WEBAPP_URL=https://ваш-домен в .env (туннель тогда не нужен).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 --url http://bot:8080
 
   # PO-token provider для yt-dlp (https://github.com/Brainicism/bgutil-ytdlp-pot-provider)
   pot-provider:

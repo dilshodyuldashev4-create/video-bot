@@ -15,7 +15,8 @@ def pages_of(total: int) -> int:
 
 def results_text(query: str, results: list[dict], page: int, lang: str, header_key: str = "results_header") -> str:
     start = page * PAGE_SIZE
-    lines = [t(lang, header_key, q=esc(query), n=len(results), page=page + 1, pages=pages_of(len(results)))]
+    shown = query.split("__", 2)[-1] if query.startswith("__") else query  # "__sim__Artist - Song" -> name
+    lines = [t(lang, header_key, q=esc(shown), n=len(results), page=page + 1, pages=pages_of(len(results)))]
     for i, r in enumerate(results[start:start + PAGE_SIZE], start=1):
         dur = fmt_duration(r.get("duration"))
         lines.append(f"<b>{i}.</b> {esc(r['title'])}" + (f" · <b>{dur}</b>" if dur else ""))
@@ -49,19 +50,64 @@ def share_row(bot_username: str, lang: str) -> list[InlineKeyboardButton]:
     ]
 
 
-def audio_kb(bot_username: str, lang: str, liked: bool = False) -> InlineKeyboardMarkup:
+def audio_kb(bot_username: str, lang: str, liked: bool = False, expanded: bool = False) -> InlineKeyboardMarkup:
+    """Under every MP3. The effects / ringtone rows open with 🎛 so the keyboard stays short."""
     b = InlineKeyboardButton
+    rows = [[b(text=t(lang, "btn_liked" if liked else "btn_like"), callback_data="lk"),
+             b(text=t(lang, "btn_lyrics"), callback_data="ly")]]
+    if expanded:
+        rows += [
+            [b(text=t(lang, "btn_up"), callback_data="fx:up"), b(text=t(lang, "btn_slow"), callback_data="fx:slow")],
+            [b(text=t(lang, "btn_8d"), callback_data="fx:8d"), b(text=t(lang, "btn_bass"), callback_data="fx:bass")],
+            [b(text=t(lang, "btn_minus"), callback_data="fx:minus"),
+             b(text=t(lang, "btn_ringtone"), callback_data="rt")],
+            [b(text=t(lang, "btn_back"), callback_data="fxb")],
+        ]
+    else:
+        rows += [
+            [b(text=t(lang, "btn_similar"), callback_data="sim"), b(text=t(lang, "btn_playlist"), callback_data="pl")],
+            [b(text=t(lang, "btn_follow"), callback_data="fol"), b(text=t(lang, "btn_story"), callback_data="st")],
+            [b(text=t(lang, "btn_more"), callback_data="fxm")],
+        ]
+    rows.append(share_row(bot_username, lang))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def is_expanded(markup: InlineKeyboardMarkup | None) -> bool:
+    return bool(markup) and any(btn.callback_data == "fx:up" for row in markup.inline_keyboard for btn in row)
+
+
+def is_liked_kb(markup: InlineKeyboardMarkup | None) -> bool:
+    liked = {t(lg, "btn_liked") for lg in LANGS}
+    return bool(markup) and any(btn.text in liked for row in markup.inline_keyboard for btn in row)
+
+
+def playlist_pick_kb(playlists: list[dict], lang: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardButton
+    rows = [[b(text=f"📂 {p['name']} · {p['count']}", callback_data=f"pla:{p['id']}")] for p in playlists[:8]]
+    rows.append([b(text=t(lang, "btn_pl_new"), callback_data="pln")])
+    rows.append([b(text=t(lang, "btn_back"), callback_data="fxb")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def playlists_kb(playlists: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [b(text=t(lang, "btn_liked" if liked else "btn_like"), callback_data="lk"),
-         b(text=t(lang, "btn_lyrics"), callback_data="ly")],
-        [b(text=t(lang, "btn_up"), callback_data="fx:up"),
-         b(text=t(lang, "btn_slow"), callback_data="fx:slow")],
-        [b(text=t(lang, "btn_8d"), callback_data="fx:8d"),
-         b(text=t(lang, "btn_bass"), callback_data="fx:bass")],
-        [b(text=t(lang, "btn_minus"), callback_data="fx:minus"),
-         b(text=t(lang, "btn_ringtone"), callback_data="rt")],
-        share_row(bot_username, lang),
-    ])
+        [InlineKeyboardButton(text=f"📂 {p['name']} · {p['count']}", callback_data=f"plo:{p['id']}")]
+        for p in playlists[:30]])
+
+
+def playlist_actions_kb(sid: int, total: int, playlist: dict, bot_username: str, lang: str,
+                        mine: bool) -> InlineKeyboardMarkup:
+    kb = results_kb(sid, total, 0) if total else InlineKeyboardMarkup(inline_keyboard=[])
+    link = f"https://t.me/{bot_username}?start=pl_{playlist['code']}"
+    share = f"https://t.me/share/url?url={quote(link)}&text={quote(t(lang, 'pl_share_text', name=playlist['name']))}"
+    row = [InlineKeyboardButton(text=t(lang, "btn_pl_share"), url=share)]
+    if mine:
+        row.append(InlineKeyboardButton(text=t(lang, "btn_pl_delete"), callback_data=f"pld:{playlist['id']}"))
+    else:
+        row.append(InlineKeyboardButton(text=t(lang, "btn_pl_save"), callback_data=f"plc:{playlist['code']}"))
+    kb.inline_keyboard.append(row)
+    return kb
 
 
 def video_kb(token: str, bot_username: str, lang: str) -> InlineKeyboardMarkup:
@@ -79,7 +125,8 @@ def main_menu(lang: str) -> ReplyKeyboardMarkup:
             [KeyboardButton(text=t(lang, "menu_top_world")), KeyboardButton(text=t(lang, "menu_top_uz")),
              KeyboardButton(text=t(lang, "menu_top_ru"))],
             [KeyboardButton(text=t(lang, "menu_mood")), KeyboardButton(text=t(lang, "menu_my_music"))],
-            [KeyboardButton(text=t(lang, "menu_wrapped", year=datetime.date.today().year))],
+            [KeyboardButton(text=t(lang, "menu_playlists")),
+             KeyboardButton(text=t(lang, "menu_wrapped", year=datetime.date.today().year))],
             [KeyboardButton(text=t(lang, "menu_help")), KeyboardButton(text=t(lang, "menu_lang"))],
         ],
         resize_keyboard=True,
