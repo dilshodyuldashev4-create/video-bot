@@ -14,8 +14,8 @@ from ..db import DB
 from ..services import downloader, recognizer
 from ..services.recognizer import Song
 from ..texts import t
-from ..utils import esc
-from .links import clips_dir
+from ..utils import canonical_key, esc
+from .links import clips_dir, link_of
 
 log = logging.getLogger(__name__)
 router = Router(name="recognize")
@@ -158,6 +158,44 @@ async def cb_get_song(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
         finally:
             if tmp:
                 shutil.rmtree(tmp.parent, ignore_errors=True)
+            try:
+                await status.delete()
+            except TelegramBadRequest:
+                pass
+
+
+@router.callback_query(F.data.startswith("dl:s:"))
+async def cb_link_shazam(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
+    """🔍 under a pasted link: download the audio, recognise it, send the song as MP3."""
+    token = call.data.split(":", 2)[2]
+    link = await link_of(db, token)
+    if not link:
+        await call.answer(t(lang, "link_expired"), show_alert=True)
+        return
+    url, platform = link
+    message = call.message
+    async with user_lock(call.from_user.id) as ok:
+        if not ok:
+            await call.answer(t(lang, "busy"))
+            return
+        await call.answer("🔍")
+        status = await message.answer(t(lang, "recognizing"))
+        audio = None
+        try:
+            key = canonical_key(url, platform)
+            vid = key.split(":", 1)[1] if key.startswith("youtube:") else key
+            audio = await downloader.download_audio(vid, url=None if key.startswith("youtube:") else url)
+            song = await recognizer.recognize(audio.path)
+            await _deliver(message, bot, db, lang, song)
+        except downloader.DownloadFailed:
+            log.warning("shazam link download failed: %s", url, exc_info=True)
+            await message.answer(t(lang, "dl_failed"))
+        except Exception:
+            log.exception("shazam link failed: %s", url)
+            await message.answer(t(lang, "error"))
+        finally:
+            if audio:
+                shutil.rmtree(audio.path.parent, ignore_errors=True)
             try:
                 await status.delete()
             except TelegramBadRequest:

@@ -166,6 +166,12 @@ async def test_link_video_then_song_button(env, monkeypatch, http_base, fake_aud
 
     monkeypatch.setattr(downloader, "download_video", fake_video)
     await send_text("https://vm.tiktok.com/ZMabc123/")
+    choice = session.of(SendMessage)[-1]
+    assert "TikTok" in choice.text
+    buttons = [b.callback_data for row in choice.reply_markup.inline_keyboard for b in row]
+    assert [b[:5] for b in buttons] == ["dl:v:", "dl:a:", "dl:s:"]
+    assert not session.of(SendVideo)  # nothing is downloaded before the user chooses
+    await press(buttons[0])
     video = session.of(SendVideo)[-1]
     assert (video.width, video.height, video.supports_streaming) == (720, 1280, True)
     assert video.thumbnail is not None
@@ -176,6 +182,8 @@ async def test_link_video_then_song_button(env, monkeypatch, http_base, fake_aud
     n_before = len(session.of(SendVideo))
     monkeypatch.setattr(downloader, "download_video", None)
     await send_text("https://vm.tiktok.com/ZMabc123/?lang=ru")
+    again = session.of(SendMessage)[-1].reply_markup.inline_keyboard[0][0].callback_data
+    await press(again)
     assert len(session.of(SendVideo)) == n_before + 1
     assert isinstance(session.of(SendVideo)[-1].video, str)  # file_id, not a re-upload
 
@@ -577,3 +585,72 @@ async def test_youtube_blocked_mp3_comes_from_catalogue_site(env, monkeypatch, m
     assert audio[-1].performer == "UzBoom" and audio[-1].title == "Kecholmadim"
     assert len(yt_downloads) <= 1  # YouTube is not retried 5 times once it is known to be blocked
     assert not any("не удалось" in (m.text or "") for m in session.of(SendMessage))
+
+
+def _choice_buttons(session) -> list[str]:
+    return [b.callback_data for row in session.of(SendMessage)[-1].reply_markup.inline_keyboard for b in row]
+
+
+async def test_link_audio_and_shazam_choices(env, monkeypatch, http_base):
+    """🎵 Audio MP3 and 🔍 Find the music under a pasted link."""
+    session, _, send_text, press, _ = env
+    real = downloader._fetch_audio
+    fetched = []
+
+    async def fake_fetch_audio(target, soundcloud=False):
+        fetched.append(target)
+        return await real(f"{http_base}/clip.mp4")
+
+    monkeypatch.setattr(downloader, "_fetch_audio", fake_fetch_audio)
+    await send_text("https://www.instagram.com/reel/ABC123/")
+    video_btn, audio_btn, shazam_btn = _choice_buttons(session)
+
+    await press(audio_btn)
+    audio = session.of(SendAudio)[-1]
+    assert not isinstance(audio.audio, str)  # uploaded mp3
+    assert fetched == ["https://www.instagram.com/reel/ABC123/"]
+
+    await press(audio_btn)  # second time: cached file_id
+    assert isinstance(session.of(SendAudio)[-1].audio, str) and len(fetched) == 1
+
+    async def fake_search(q, limit=30):
+        return [downloader.Track(id="oorVWW9ywG0", title="POP SMOKE - DIOR")]
+
+    async def fake_rec(path):
+        assert Path(path).exists()
+        return recognizer.Song("Dior", "Pop Smoke")
+
+    monkeypatch.setattr(recognizer, "recognize", fake_rec)
+    monkeypatch.setattr(downloader, "search", fake_search)
+    await press(shazam_btn)
+    assert any("Shazam нашёл" in (m.text or "") for m in session.of(SendMessage))
+    assert "Найдено по звуку" in session.of(SendAudio)[-1].caption
+
+    await press("dl:v:doesnotexist")
+    from aiogram.methods import AnswerCallbackQuery as ACQ
+    assert "устарела" in session.of(ACQ)[-1].text
+
+
+async def test_youtube_link_blocked_uses_invidious(env, monkeypatch, media_dir):
+    """Live bug: every YouTube link failed with "Sign in to confirm you're not a bot"."""
+    from bot.services import ytalt
+
+    session, _, send_text, press, _ = env
+
+    def blocked(url, opts, download=True):
+        raise downloader.yt_dlp.utils.DownloadError("ERROR: [youtube] Uk9u4ikJY0U: Sign in to confirm you're not a bot")
+
+    alt_calls = []
+
+    def fake_alt(video_id, workdir, height, limit):
+        alt_calls.append(video_id)
+        shutil.copy(media_dir / "clip.mp4", workdir / f"{video_id}.mp4")
+        return ytalt.Info(id=video_id, title="Superliga 20-tur", author="Futbol", duration=30, thumb="")
+
+    monkeypatch.setattr(downloader, "_extract", blocked)
+    monkeypatch.setattr(ytalt, "download_video", fake_alt)
+    await send_text("https://youtu.be/Uk9u4ikJY0U?si=fHmqBifIGrlqgnXW")
+    await press(_choice_buttons(session)[0])
+    assert alt_calls == ["Uk9u4ikJY0U"]
+    assert session.of(SendVideo), "video must be sent"
+    assert not any("Не получилось" in (m.text or "") for m in session.of(SendMessage))

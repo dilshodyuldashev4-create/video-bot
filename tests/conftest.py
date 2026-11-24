@@ -53,4 +53,8 @@ def no_mp3_sites(monkeypatch):
         raise RuntimeError("all mp3 mirrors failed: offline in tests")
 
     monkeypatch.setattr(mp3sites, "search_sync", offline)
+    from bot.services import ytalt
+
+    monkeypatch.setattr(ytalt, "instances", lambda: [])
+    monkeypatch.setattr(ytalt, "_down_until", 0.0)
     monkeypatch.setattr(downloader, "_yt_blocked_until", 0.0)
