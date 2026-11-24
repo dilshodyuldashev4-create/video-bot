@@ -19,7 +19,7 @@ from aiogram.enums import ButtonStyle
 
 from ..config import config
 from ..db import DB
-from ..services import downloader, mp3sites, ytalt
+from ..services import downloader, mp3sites, tiktok, ytalt
 from ..texts import LANGS, LINE
 from ..utils import esc
 
@@ -253,6 +253,7 @@ async def run_broadcast(bot: Bot, db: DB, from_chat: int, message_id: int, progr
 
 # ---------------------------------------------------------------- diagnostics
 
+DIAG_TIKTOK = "https://www.tiktok.com/@scout2015/video/6718335390845095173"
 DIAG_TARGETS = [
     ("YouTube", "https://www.youtube.com/watch?v=jNQXAC9IVRw"),
     ("SoundCloud", "scsearch1:Pop Smoke Dior"),
@@ -265,7 +266,7 @@ async def diag_text() -> str:
         "🩺 <b>Диагностика</b>", LINE,
         f"yt-dlp: <code>{yt_dlp.version.__version__}</code>",
         f"deno: {'✅' if shutil.which('deno') else '❌ not installed'}",
-        f"cookies: {'✅' if config.cookies else '—'}",
+        f"cookies: {'✅ ' + esc(config.cookies) if config.cookies else '—'}",
     ]
     if config.pot_url:
         try:
@@ -285,7 +286,10 @@ async def diag_text() -> str:
             downloader.check_route_async(url, True) if config.proxy else asyncio.sleep(0, "—"),
         )
         fmt = lambda r: "✅" if r is None else ("—" if r == "—" else f"❌ {esc(r)}")
-        return f"<b>{name}</b>\n  direct: {fmt(direct)}\n  via proxy: {fmt(proxied)}"
+        text = f"<b>{name}</b>\n  direct: {fmt(direct)}\n  via proxy: {fmt(proxied)}"
+        if name == "YouTube" and config.yt_proxy:
+            text += f"\n  via YT_PROXY_URL: {fmt(await downloader.check_route_async(url, config.yt_proxy))}"
+        return text
 
     lines += await asyncio.gather(*(check(n, u) for n, u in DIAG_TARGETS))
 
@@ -299,11 +303,19 @@ async def diag_text() -> str:
 
     def alt() -> str:
         try:
+            ytalt.reset_pause()
             info = ytalt.fetch_info("jNQXAC9IVRw")
             return f"✅ {esc(info.source)}"
         except Exception as e:  # noqa: BLE001
-            return f"❌ {esc(str(e)[:150])}"
+            return f"❌ {esc(str(e)[:300])}"
     lines.append(f"<b>YouTube через Invidious/Piped</b>: {await asyncio.to_thread(alt)}")
+    def tt() -> str:
+        try:
+            post = tiktok.fetch(DIAG_TIKTOK)
+            return "✅" if post.video or post.images else "⚠️ no video"
+        except Exception as e:  # noqa: BLE001
+            return f"❌ {esc(str(e)[:150])}"
+    lines.append(f"<b>TikTok через tikwm</b>: {await asyncio.to_thread(tt)}")
     if downloader.youtube_blocked():
         lines.append("⚠️ YouTube сейчас блокирует сервер: MP3 берутся из других источников")
     return "\n".join(lines)
@@ -327,3 +339,55 @@ async def cmd_diag(message: Message, db: DB) -> None:
         return
     status = await message.answer("🩺 …")
     await status.edit_text(await diag_text(), disable_web_page_preview=True)
+
+
+# ---------------------------------------------------------------- YouTube cookies (sent as a file)
+
+COOKIES_HELP = (
+    "🍪 <b>Cookies для YouTube</b>\n" + LINE + "\n"
+    "Пришли мне файл <code>cookies.txt</code> (формат Netscape) от запасного Google-аккаунта, "
+    "и я сразу начну качать YouTube с ним.\n\n"
+    "/cookies — статус\n/cookies off — удалить cookies"
+)
+
+
+def _looks_like_cookies(data: bytes) -> bool:
+    text = data[:200_000].decode("utf-8", "replace")
+    return ".youtube.com" in text and "\t" in text
+
+
+@router.message(Command("cookies"))
+async def cmd_cookies(message: Message, db: DB, command: CommandObject) -> None:
+    if not await is_admin(db, message.from_user.id):
+        return
+    if (command.args or "").strip().lower() in ("off", "delete", "del"):
+        config.cookies_path.unlink(missing_ok=True)
+        await message.answer("🗑 Cookies удалены.")
+        return
+    state = f"✅ сейчас используются: <code>{esc(config.cookies)}</code>" if config.cookies else "— сейчас нет"
+    await message.answer(f"{COOKIES_HELP}\n\n{state}")
+
+
+@router.message(F.document & F.document.file_name.lower().endswith(".txt"))
+async def on_cookies_file(message: Message, bot: Bot, db: DB) -> None:
+    if not await is_admin(db, message.from_user.id):
+        return
+    if message.document.file_size and message.document.file_size > 2_000_000:
+        await message.answer("❌ Файл слишком большой для cookies.")
+        return
+    tmp = config.data_dir / "cookies.upload"
+    await bot.download(message.document.file_id, destination=tmp)
+    data = tmp.read_bytes()
+    tmp.unlink(missing_ok=True)
+    if not _looks_like_cookies(data):
+        await message.answer("❌ Это не похоже на cookies YouTube (нужен cookies.txt в формате Netscape с .youtube.com).")
+        return
+    config.cookies_path.write_bytes(data)
+    config.cookies_path.chmod(0o600)
+    downloader.reset_youtube_block()
+    status = await message.answer("✅ Cookies сохранены. Проверяю YouTube…")
+    err = await downloader.check_route_async(DIAG_TARGETS[0][1], False)
+    if err and config.proxy:
+        err = await downloader.check_route_async(DIAG_TARGETS[0][1], True)
+    await status.edit_text("✅ Cookies сохранены, YouTube работает!" if err is None
+                           else f"⚠️ Cookies сохранены, но YouTube пока отвечает:\n<code>{esc(err)}</code>")

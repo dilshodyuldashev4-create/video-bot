@@ -33,6 +33,11 @@ _good: list[tuple[str, str]] = []  # instances that worked recently go first
 _down_until = 0.0
 
 
+def reset_pause() -> None:
+    global _down_until
+    _down_until = 0.0
+
+
 def available() -> bool:
     return _down_until <= time.time()
 

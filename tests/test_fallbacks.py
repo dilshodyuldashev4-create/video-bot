@@ -166,3 +166,10 @@ def test_soundcloud_skips_drm_tracks(monkeypatch, tmp_path):
     monkeypatch.setattr(downloader.yt_dlp, "YoutubeDL", SC)
     assert downloader._soundcloud_sync("POP SMOKE - DIOR", tmp_path)["id"] == "ok"
     assert len(tried) == 2
+
+
+def test_youtube_proxy_goes_first_for_youtube_only(monkeypatch):
+    monkeypatch.setattr(config, "yt_proxy", "http://u:p@res.example:8000")
+    monkeypatch.setattr(config, "proxy", "socks5://warp:1080")
+    assert downloader._routes("https://youtu.be/U3kf72Zw3yA") == [{"proxy": "http://u:p@res.example:8000"}, {}]
+    assert downloader._routes("https://www.tiktok.com/@a/video/1")[0] == {}
