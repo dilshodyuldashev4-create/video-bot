@@ -8,12 +8,12 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile, Message
 from aiogram.utils.media_group import MediaGroupBuilder
 
-from ..common import bot_username, user_lock
+from ..common import bot_username, react, user_lock
 from ..config import config
 from ..db import DB
 from ..keyboards import video_kb
 from ..services import downloader, media
-from ..texts import t
+from ..texts import PLATFORM_ICONS, t
 from ..utils import URL_RE, canonical_key, detect_platform, extract_url
 
 log = logging.getLogger(__name__)
@@ -28,10 +28,10 @@ def clips_dir():
     return d
 
 
-async def _send_cached(message: Message, cached: tuple, lang: str, username: str) -> bool:
+async def _send_cached(message: Message, cached: tuple, lang: str, username: str, platform: str) -> bool:
     kind, file_id, meta = cached
     token = meta.get("token") or ""
-    caption = t(lang, "video_caption", bot=username)
+    caption = video_caption(lang, username, meta.get("platform") or platform)
     kb = video_kb(token, username, lang)
     try:
         if kind == "video":
@@ -47,6 +47,11 @@ async def _send_cached(message: Message, cached: tuple, lang: str, username: str
         return True
     except TelegramBadRequest:
         return False
+
+
+def video_caption(lang: str, username: str, platform: str) -> str:
+    icon, name = PLATFORM_ICONS.get(platform, ("📥", platform.capitalize() or "Web"))
+    return t(lang, "video_caption", icon=icon, platform=name, bot=username)
 
 
 @router.message(F.text.regexp(URL_RE) | F.caption.regexp(URL_RE))
@@ -65,9 +70,12 @@ async def on_link(message: Message, bot: Bot, db: DB, lang: str) -> None:
                 await message.reply(t(lang, "busy"))
             return
         username = await bot_username(bot)
+        await react(message, "👀")
         status = await message.reply(t(lang, "downloading"))
+        done = False
         try:
             await _handle(message, bot, db, lang, username, url, platform)
+            done = True
         except downloader.TooBig:
             await message.reply(t(lang, "too_big"))
         except downloader.DownloadFailed:
@@ -77,6 +85,7 @@ async def on_link(message: Message, bot: Bot, db: DB, lang: str) -> None:
             log.exception("link handler failed: %s", url)
             await message.reply(t(lang, "error"))
         finally:
+            await react(message, "🔥" if done else "😢")
             try:
                 await status.delete()
             except TelegramBadRequest:
@@ -86,14 +95,14 @@ async def on_link(message: Message, bot: Bot, db: DB, lang: str) -> None:
 async def _handle(message: Message, bot: Bot, db: DB, lang: str, username: str, url: str, platform: str) -> None:
     key = "v:" + canonical_key(url, platform)
     cached = await db.get_file(key)
-    if cached and await _send_cached(message, cached, lang, username):
+    if cached and await _send_cached(message, cached, lang, username, platform):
         await db.incr("downloads")
         return
 
     res = await downloader.download_video(url, platform)
     try:
         token = uuid.uuid4().hex[:16]
-        caption = t(lang, "video_caption", bot=username)
+        caption = video_caption(lang, username, platform)
         kb = video_kb(token, username, lang)
         videos = [p for p in res.files if p.suffix.lower() not in PHOTO_EXT]
 
@@ -131,7 +140,7 @@ async def _handle(message: Message, bot: Bot, db: DB, lang: str, username: str, 
 
         await db.incr("downloads")
         if file_id:
-            meta = {"token": token, "hint": res.track_hint, "items": items}
+            meta = {"token": token, "hint": res.track_hint, "items": items, "platform": platform}
             await db.put_file(key, kind, file_id, meta)
             await db.put_file("v:" + res.key, kind, file_id, meta)
             first_video = next((i["id"] for i in items if i["t"] == "video"), file_id if kind == "video" else "")

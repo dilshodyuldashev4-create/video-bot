@@ -24,6 +24,15 @@ CREATE TABLE IF NOT EXISTS searches (
     results TEXT NOT NULL,
     created INTEGER
 );
+CREATE TABLE IF NOT EXISTS likes (
+    user_id INTEGER NOT NULL,
+    unique_id TEXT NOT NULL,
+    file_id TEXT NOT NULL,
+    title TEXT,
+    duration INTEGER,
+    created INTEGER,
+    PRIMARY KEY (user_id, unique_id)
+);
 CREATE TABLE IF NOT EXISTS stats (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL DEFAULT 0
@@ -110,6 +119,34 @@ class DB:
     async def prune_searches(self, max_age: int = 7 * 86400) -> None:
         await self.conn.execute("DELETE FROM searches WHERE created < ?", (int(time.time()) - max_age,))
         await self.conn.commit()
+
+    # likes ("My music" playlist)
+    async def toggle_like(self, user_id: int, unique_id: str, file_id: str, title: str, duration: int) -> bool:
+        """Returns True if the track is now liked, False if the like was removed."""
+        cur = await self.conn.execute("DELETE FROM likes WHERE user_id=? AND unique_id=?", (user_id, unique_id))
+        if cur.rowcount:
+            await self.conn.commit()
+            return False
+        await self.conn.execute(
+            "INSERT INTO likes(user_id, unique_id, file_id, title, duration, created) VALUES(?,?,?,?,?,?)",
+            (user_id, unique_id, file_id, title, duration, int(time.time())),
+        )
+        await self.conn.commit()
+        return True
+
+    async def is_liked(self, user_id: int, unique_id: str) -> bool:
+        async with self.conn.execute(
+            "SELECT 1 FROM likes WHERE user_id=? AND unique_id=?", (user_id, unique_id)
+        ) as cur:
+            return await cur.fetchone() is not None
+
+    async def get_likes(self, user_id: int, limit: int = 100) -> list[dict]:
+        async with self.conn.execute(
+            "SELECT file_id, title, duration FROM likes WHERE user_id=? ORDER BY created DESC LIMIT ?",
+            (user_id, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [{"id": f"fid:{r[0]}", "title": r[1] or "♪", "duration": r[2] or 0} for r in rows]
 
     # stats
     async def incr(self, name: str) -> None:

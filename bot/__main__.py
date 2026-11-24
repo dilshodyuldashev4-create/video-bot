@@ -12,7 +12,7 @@ from aiogram.types import BotCommand
 
 from .config import config
 from .db import DB
-from .handlers import links, recognize, search, start
+from .handlers import library, links, recognize, search, start
 from .middlewares import LangMiddleware
 from .utils import cleanup_old
 
@@ -36,7 +36,7 @@ def build_dispatcher(db: DB) -> Dispatcher:
     dp.message.outer_middleware(mw)
     dp.callback_query.outer_middleware(mw)
     # order matters: commands, then links, then media, then plain text = search
-    dp.include_routers(start.router, links.router, recognize.router, search.router)
+    dp.include_routers(start.router, library.router, links.router, recognize.router, search.router)
     return dp
 
 
@@ -59,6 +59,7 @@ async def main() -> None:
 
     await bot.set_my_commands([
         BotCommand(command="start", description="🏠 Start / Старт"),
+        BotCommand(command="mymusic", description="❤️ My music / Моя музыка"),
         BotCommand(command="help", description="📖 Help / Помощь"),
         BotCommand(command="lang", description="🌐 Language / Til / Язык"),
     ])
