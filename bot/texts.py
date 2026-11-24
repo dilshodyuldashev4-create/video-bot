@@ -1,4 +1,4 @@
-"""All user-facing strings, in Russian and Uzbek."""
+"""All user-facing strings: Uzbek, Russian, English."""
 
 LINE = "━━━━━━━━━━━━━━━"
 
@@ -151,11 +151,86 @@ TEXTS: dict[str, dict[str, str]] = {
         "error": "⚠️ Nimadir xato ketdi. Qayta urinib ko'ring.",
         "stats": "📊 <b>Statistika</b>\n" + LINE + "\n👥 Foydalanuvchilar: <b>{users}</b>\n📥 Yuklashlar: <b>{downloads}</b>\n🔍 Aniqlashlar: <b>{recognitions}</b>",
     },
+    "en": {
+        "start": (
+            "⚡️ <b>Yo, {name}!</b> You're in the fastest music bot 🔥\n"
+            f"{LINE}\n"
+            "🎧 <b>Music</b> — type a song or an artist\n"
+            "📥 <b>Video</b> — drop a YouTube · Instagram · TikTok link\n"
+            "🔍 <b>Shazam</b> — send a video, audio, voice or video note, I'll name the track\n"
+            "🔥 <b>Top of the week</b> · 🇺🇿 <b>UZ</b> · 🇷🇺 <b>RU</b> — fresh charts in the menu\n"
+            "⚡ <b>Speed up</b> · 🌙 <b>Slowed + reverb</b> — any song in one tap\n"
+            "❤️ <b>My music</b> — like tracks and build your playlist\n"
+            f"{LINE}\n"
+            "👇 Try it now: <code>Pop Smoke Dior</code>"
+        ),
+        "help": (
+            "📖 <b>How it works</b>\n"
+            f"{LINE}\n"
+            "🎧 Type <code>Dior</code> → pick a number → the MP3 is yours\n"
+            "📥 Drop a link → HD video, no watermark\n"
+            "🎵 Tap «Get the song» under a video → the bot finds the track from it\n"
+            "🔍 Send a video / audio / voice → Shazam names the song\n"
+            "❤️ Tap «Add to favorites» → the track goes to /mymusic\n"
+            "⚡ / 🌙 Under any MP3 → speed up or slowed + reverb version\n"
+            "🔥 Menu → top of the week, Uzbekistan and Russia charts (/top)\n"
+            f"{LINE}\n"
+            "👥 Add the bot to a group and it will download links right in the chat"
+        ),
+        "choose_lang": "🌐 Choose a language:",
+        "lang_set": "✅ Language: English",
+        "searching": "🔎",
+        "nothing_found": "🙈 Nothing found for «<b>{q}</b>». Try spelling it differently.",
+        "results_header": "🎧 <b>{q}</b>\n<i>Pick a number 👇</i> · page {page}/{pages}\n" + LINE,
+        "search_expired": "⌛️ This search expired, send your request again.",
+        "downloading": "⏳",
+        "audio_footer": "⚡️ @{bot} — music in a second",
+        "video_caption": "{icon} <b>Done!</b> Video from {platform}\n" + LINE + "\n⚡️ Downloaded with @{bot}",
+        "btn_get_song": "🎵 Get the song from this video",
+        "btn_add_group": "➕ Add to group",
+        "btn_share": "🔗 Share",
+        "btn_like": "❤️ Add to favorites",
+        "btn_liked": "💖 In favorites",
+        "btn_shazam": "🔍 Open in Shazam",
+        "share_text": "🔥 Download music and videos from YouTube, Instagram and TikTok + Shazam right in Telegram",
+        "liked": "💖 Added to «My music»",
+        "unliked": "💔 Removed from «My music»",
+        "my_music_header": "❤️ <b>My music</b> · {n} tracks\n<i>Pick a number 👇</i> · page {page}/{pages}\n" + LINE,
+        "my_music_empty": "❤️ <b>My music</b> is empty for now.\nTap «❤️ Add to favorites» under any track and it will show up here.",
+        "menu_top_world": "🔥 Top of the week",
+        "menu_top_uz": "🇺🇿 Top UZ",
+        "menu_top_ru": "🇷🇺 Top RU",
+        "chart_world_header": "🔥 <b>Top of the week</b> · what everyone shazams and plays on TikTok\n<i>Pick a number 👇</i> · page {page}/{pages}\n" + LINE,
+        "chart_uz_header": "🇺🇿 <b>Top Uzbekistan</b>\n<i>Pick a number 👇</i> · page {page}/{pages}\n" + LINE,
+        "chart_ru_header": "🇷🇺 <b>Top Russia</b>\n<i>Pick a number 👇</i> · page {page}/{pages}\n" + LINE,
+        "chart_failed": "😔 The chart didn't load right now. Try again in a minute.",
+        "btn_up": "⚡ Speed up",
+        "btn_slow": "🌙 Slowed + reverb",
+        "fx_header_up": "⚡ <b>Speed up</b> version",
+        "fx_header_slow": "🌙 <b>Slowed + reverb</b> version",
+        "menu_my_music": "❤️ My music",
+        "menu_help": "❓ Help",
+        "menu_lang": "🌐 Language",
+        "recognizing": "🎧",
+        "not_recognized": "🙉 Couldn't recognise the track. Send a clip where the music is clearer (10–20 sec).",
+        "recognized_card": "🔍 <b>Shazam found it!</b>\n" + LINE + "\n🎵 <b>{title}</b>\n👤 {artist}\n" + LINE + "\n⏬ Getting the MP3…",
+        "recognized_header": "🔍 Found by sound",
+        "song_not_found_dl": "🎵 It's <b>{title}</b> — {artist}, but no MP3 was found. Try searching by name.",
+        "unsupported_link": "🤔 I don't know this link. Send YouTube, Instagram or TikTok.",
+        "track_failed": "😔 This track won't download right now. Try another number from the list.",
+        "dl_failed": "😔 Couldn't download. The video may be private, deleted or available only after login.",
+        "too_big": "📦 This video is too heavy for Telegram even in low quality.",
+        "file_too_big": "📦 The file is too big. Send a shorter clip (up to 20 MB).",
+        "busy": "⏳ One sec, still working on your previous request.",
+        "error": "⚠️ Something went wrong. Please try again.",
+        "stats": "📊 <b>Stats</b>\n" + LINE + "\n👥 Users: <b>{users}</b>\n📥 Downloads: <b>{downloads}</b>\n🔍 Recognitions: <b>{recognitions}</b>",
+    },
 }
+
+LANGS = {"uz": "🇺🇿 O'zbekcha", "ru": "🇷🇺 Русский", "en": "🇬🇧 English"}
 
 PLATFORM_ICONS = {"youtube": ("▶️", "YouTube"), "instagram": ("📸", "Instagram"), "tiktok": ("🎵", "TikTok")}
 
-LANGS = {"ru": "🇷🇺 Русский", "uz": "🇺🇿 O'zbekcha"}
 DEFAULT_LANG = "ru"
 
 
@@ -166,7 +241,13 @@ def t(lang: str | None, key: str, **kw) -> str:
 
 
 def guess_lang(language_code: str | None) -> str:
-    return "uz" if (language_code or "").lower().startswith("uz") else DEFAULT_LANG
+    """Telegram app language -> bot language (uz, ru, en). Unknown languages get Russian."""
+    code = (language_code or "").lower()[:2]
+    if code == "uz":
+        return "uz"
+    if code == "en":
+        return "en"
+    return DEFAULT_LANG
 
 
 def menu_labels(key: str) -> set[str]:

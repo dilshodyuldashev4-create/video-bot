@@ -1,4 +1,4 @@
-"""Small SQLite store: users, language, Telegram file_id cache, saved searches, stats."""
+"""Small SQLite store: users, admins, language, file_id cache, saved searches, likes, stats."""
 import json
 import time
 from pathlib import Path
@@ -33,6 +33,10 @@ CREATE TABLE IF NOT EXISTS likes (
     created INTEGER,
     PRIMARY KEY (user_id, unique_id)
 );
+CREATE TABLE IF NOT EXISTS admins (
+    id INTEGER PRIMARY KEY,
+    created INTEGER
+);
 CREATE TABLE IF NOT EXISTS stats (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL DEFAULT 0
@@ -50,6 +54,12 @@ class DB:
         self.conn = await aiosqlite.connect(self.path)
         await self.conn.executescript(SCHEMA)
         await self.conn.execute("PRAGMA journal_mode=WAL")
+        # migrations for databases created by older versions
+        async with self.conn.execute("PRAGMA table_info(users)") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+        for col, ddl in (("last_seen", "INTEGER"), ("blocked", "INTEGER NOT NULL DEFAULT 0")):
+            if col not in cols:
+                await self.conn.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
         await self.conn.commit()
 
     async def close(self) -> None:
@@ -82,6 +92,64 @@ class DB:
     async def count_users(self) -> int:
         async with self.conn.execute("SELECT COUNT(*) FROM users") as cur:
             return (await cur.fetchone())[0]
+
+    async def touch(self, user_id: int) -> None:
+        """Mark the user active now (they also unblocked the bot if they write to it)."""
+        await self.conn.execute("UPDATE users SET last_seen=?, blocked=0 WHERE id=?", (int(time.time()), user_id))
+        await self.conn.commit()
+
+    async def set_blocked(self, user_id: int) -> None:
+        await self.conn.execute("UPDATE users SET blocked=1 WHERE id=?", (user_id,))
+        await self.conn.commit()
+
+    async def broadcast_ids(self) -> list[int]:
+        async with self.conn.execute("SELECT id FROM users WHERE blocked=0 AND id > 0 ORDER BY id") as cur:
+            return [r[0] for r in await cur.fetchall()]
+
+    async def _scalar(self, sql: str, *args) -> int:
+        async with self.conn.execute(sql, args) as cur:
+            row = await cur.fetchone()
+        return int(row[0] or 0) if row else 0
+
+    async def user_stats(self) -> dict:
+        now = int(time.time())
+        day, week = now - 86400, now - 7 * 86400
+        stats = {
+            "total": await self._scalar("SELECT COUNT(*) FROM users"),
+            "new_day": await self._scalar("SELECT COUNT(*) FROM users WHERE created >= ?", day),
+            "new_week": await self._scalar("SELECT COUNT(*) FROM users WHERE created >= ?", week),
+            "active_day": await self._scalar("SELECT COUNT(*) FROM users WHERE last_seen >= ?", day),
+            "active_week": await self._scalar("SELECT COUNT(*) FROM users WHERE last_seen >= ?", week),
+            "blocked": await self._scalar("SELECT COUNT(*) FROM users WHERE blocked = 1"),
+            "likes": await self._scalar("SELECT COUNT(*) FROM likes"),
+            "searches_week": await self._scalar(
+                "SELECT COUNT(*) FROM searches WHERE created >= ? AND query NOT LIKE '\\_\\_%' ESCAPE '\\'", week),
+        }
+        async with self.conn.execute("SELECT lang, COUNT(*) FROM users GROUP BY lang") as cur:
+            stats["langs"] = {r[0] or "?": r[1] for r in await cur.fetchall()}
+        return stats
+
+    async def top_queries(self, days: int = 7, limit: int = 15) -> list[tuple[str, int]]:
+        since = int(time.time()) - days * 86400
+        async with self.conn.execute(
+            "SELECT lower(query) q, COUNT(*) c FROM searches WHERE created >= ? "
+            "AND query NOT LIKE '\\_\\_%' ESCAPE '\\' GROUP BY q ORDER BY c DESC LIMIT ?",
+            (since, limit),
+        ) as cur:
+            return [(r[0], r[1]) for r in await cur.fetchall()]
+
+    # admins (in addition to ADMIN_IDS from .env)
+    async def admin_ids(self) -> set[int]:
+        async with self.conn.execute("SELECT id FROM admins") as cur:
+            return {r[0] for r in await cur.fetchall()}
+
+    async def add_admin(self, user_id: int) -> None:
+        await self.conn.execute("INSERT OR IGNORE INTO admins(id, created) VALUES(?,?)", (user_id, int(time.time())))
+        await self.conn.commit()
+
+    async def remove_admin(self, user_id: int) -> None:
+        await self.conn.execute("DELETE FROM admins WHERE id=?", (user_id,))
+        await self.conn.commit()
 
     # file_id cache: the same track/video is sent instantly the second time
     async def get_file(self, key: str) -> tuple[str, str, dict] | None:
