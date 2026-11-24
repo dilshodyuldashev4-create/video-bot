@@ -12,7 +12,7 @@ from pathlib import Path
 import yt_dlp
 
 from ..config import config
-from . import media
+from . import media, mp3sites
 
 log = logging.getLogger(__name__)
 
@@ -129,26 +129,72 @@ def _routes(url: str) -> list[dict]:
     return routes
 
 
+_BOT_CHECK = ("not a bot", "sign in to confirm", "confirm you're not", "confirm you’re not")
+# Other YouTube player clients sometimes pass when the default one gets the bot check.
+_YT_FALLBACK_CLIENTS = (["tv_simply"], ["mweb"], ["web_safari"])
+# When every route/client got the bot check, YouTube downloads are skipped for a while
+# and songs come from the other sources straight away (no 10 s of pointless retries).
+YT_BLOCK_PAUSE = 15 * 60
+_yt_blocked_until = 0.0
+
+
+def youtube_blocked() -> bool:
+    return _yt_blocked_until > time.time()
+
+
+def _is_bot_check(e: Exception) -> bool:
+    msg = str(e).lower()
+    return any(p in msg for p in _BOT_CHECK)
+
+
+def _with_client(opts: dict, client: list[str]) -> dict:
+    args = {k: dict(v) for k, v in (opts.get("extractor_args") or {}).items()}
+    args.setdefault("youtube", {})["player_client"] = client
+    return opts | {"extractor_args": args}
+
+
 def _extract(url: str, opts: dict, download: bool = True) -> dict:
-    """yt-dlp extract_info with the direct -> proxy fallback (blocking; run in a thread)."""
+    """yt-dlp extract_info with the direct -> proxy fallback (blocking; run in a thread).
+    For YouTube videos that hit the bot check, other player clients are tried too."""
+    global _yt_blocked_until
+    site = _site(url)
+    yt_video = site == "youtube" and not url.startswith("ytsearch")
+    attempts: list[tuple[dict, str]] = [(opts | r, "proxy" if r else "direct") for r in _routes(url)]
+    clients_added = False
     last: Exception | None = None
-    for extra in _routes(url):
+    i = 0
+    while i < len(attempts):
+        run_opts, label = attempts[i]
+        i += 1
         try:
-            with yt_dlp.YoutubeDL(opts | extra) as ydl:
+            with yt_dlp.YoutubeDL(run_opts) as ydl:
                 info = ydl.extract_info(url, download=download)
         except yt_dlp.utils.DownloadError as e:
             last = e
-            log.warning("yt-dlp failed (%s) for %s: %s", "proxy" if extra else "direct", url, str(e)[:300])
+            log.warning("yt-dlp failed (%s) for %s: %s", label, url, str(e)[:300])
             if any(p in str(e).lower() for p in _PERMANENT):
                 break
+            if yt_video and not clients_added and i == len(attempts) and _is_bot_check(e):
+                clients_added = True
+                for client in _YT_FALLBACK_CLIENTS:
+                    for r in _routes(url):
+                        attempts.append((_with_client(opts, client) | r,
+                                         f"{'proxy' if r else 'direct'}+{client[0]}"))
             continue
-        site = _site(url)
-        if extra:
+        if "+" in label:
+            log.info("YouTube worked with %s for %s", label, url)
+        if yt_video:
+            _yt_blocked_until = 0.0
+        if label.startswith("proxy"):
             _proxy_first_until[site] = time.time() + _PREFER_PROXY_FOR
-        else:
+        elif label == "direct":
             _proxy_first_until.pop(site, None)
         return info
     assert last is not None
+    if yt_video and _is_bot_check(last):
+        _yt_blocked_until = time.time() + YT_BLOCK_PAUSE
+        log.warning("YouTube blocks this server right now; other MP3 sources are used for %d min",
+                    YT_BLOCK_PAUSE // 60)
     raise last
 
 
@@ -207,19 +253,22 @@ def similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, norm(a), norm(b)).ratio()
 
 
-async def find_best(title: str, artist: str) -> Track | None:
-    """Find the YouTube upload that best matches a recognised song."""
+def _main_artist(artist: str) -> str:
+    return re.split(r",|&| feat\.? | ft\.? | x ", artist.lower())[0].strip() if artist else ""
+
+
+def rank_tracks(results: list[Track], title: str, artist: str) -> list[Track]:
+    """Best matches for a song first; results that don't mention the title at all are dropped."""
     query = f"{artist} - {title}" if artist else title
-    results = await search(query, limit=8)
-    if not results:
-        return None
+    title_words = set(re.findall(r"\w{3,}", title.lower())) or set(re.findall(r"\w+", title.lower()))
+    main = _main_artist(artist)
 
     def score(tr: Track) -> float:
-        s = similarity(query, _JUNK.sub("", tr.title))
         low = tr.title.lower()
+        s = similarity(query, _JUNK.sub("", tr.title))
         if title.lower() in low:
             s += 0.3
-        if artist and artist.split(",")[0].split("&")[0].strip().lower() in (low + " " + tr.uploader.lower()):
+        if main and main in (low + " " + tr.uploader.lower()):
             s += 0.3
         if any(w in low for w in ("cover", "remix", "slowed", "speed up", "sped up", "karaoke", "1 hour", "nightcore")) \
                 and not any(w in query.lower() for w in ("cover", "remix", "slowed", "sped")):
@@ -228,7 +277,101 @@ async def find_best(title: str, artist: str) -> Track | None:
             s += 0.15
         return s
 
-    return max(results, key=score)
+    relevant = [tr for tr in results
+                if not title_words or title_words & set(re.findall(r"\w+", (tr.title + " " + tr.uploader).lower()))]
+    return sorted(relevant, key=score, reverse=True)
+
+
+async def find_best(title: str, artist: str) -> Track | None:
+    """Find the YouTube upload that best matches a recognised song."""
+    query = f"{artist} - {title}" if artist else title
+    ranked = rank_tracks(await search(query, limit=8), title, artist)
+    return ranked[0] if ranked else None
+
+
+MAX_YT_TRIES = 5
+
+
+async def download_song(title: str, artist: str = "", prefer_id: str | None = None) -> AudioFile:
+    """Get an MP3 of a song no matter what: the chosen YouTube video, then MP3 catalogue
+    sites (work even when YouTube blocks the server), then the next best YouTube matches,
+    then SoundCloud. Single sources often fail (region-locked, removed, blocked server IP)."""
+    errors: list[str] = []
+    tried: set[str] = set()
+
+    async def attempt(video_id: str) -> AudioFile | None:
+        tried.add(video_id)
+        try:
+            return await download_audio(video_id)
+        except DownloadFailed as e:
+            errors.append(f"yt:{video_id}: {str(e)[:120]}")
+            return None
+
+    if prefer_id and not youtube_blocked() and (audio := await attempt(prefer_id)):
+        return audio
+
+    queries = list(dict.fromkeys(q for q in (
+        f"{artist} - {title}" if artist else "",
+        f"{title} {artist}".strip(),
+        title,
+    ) if q))
+
+    try:
+        return await download_from_sites(title, artist)
+    except DownloadFailed as e:
+        errors.append(f"sites: {str(e)[:160]}")
+
+    if not youtube_blocked():
+        for q in queries[:2]:
+            for tr in rank_tracks(await search(q, limit=8), title, artist):
+                if len(tried) >= MAX_YT_TRIES or youtube_blocked():
+                    break
+                if tr.id in tried:
+                    continue
+                if audio := await attempt(tr.id):
+                    return audio
+
+    for q in queries[:2]:
+        try:
+            return await download_audio_soundcloud(q)
+        except DownloadFailed as e:
+            errors.append(f"sc:{q}: {str(e)[:120]}")
+    log.warning("no MP3 for %r / %r: %s", artist, title, " | ".join(errors))
+    raise DownloadFailed("; ".join(errors) or "nothing found")
+
+
+def _sites_sync(title: str, artist: str, workdir: Path) -> tuple[mp3sites.SiteTrack, Path, Path | None]:
+    queries = list(dict.fromkeys(q for q in (f"{artist} {title}".strip(), title) if q))
+    last: Exception | None = None
+    for q in queries:
+        try:
+            found, base = mp3sites.search_sync(q)
+        except Exception as e:  # noqa: BLE001
+            last = e
+            break  # every mirror is unreachable: another query won't help
+        for tr in mp3sites.pick(found, title, artist)[:3]:
+            try:
+                path, cover = mp3sites.download_sync(tr, base + "/", workdir)
+                return tr, path, cover
+            except Exception as e:  # noqa: BLE001
+                last = e
+        if not last:
+            last = RuntimeError(f"no match for {q!r} ({len(found)} results)")
+    raise DownloadFailed(str(last or "nothing found"))
+
+
+async def download_from_sites(title: str, artist: str = "") -> AudioFile:
+    workdir = _new_workdir()
+    try:
+        tr, path, cover = await _in_thread(_sites_sync, title, artist, workdir)
+    except Exception as e:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise e if isinstance(e, DownloadFailed) else DownloadFailed(str(e)) from e
+    info = await media.probe(path)
+    thumb = await media.image_to_thumb(cover, workdir / "thumb_tg.jpg") if cover else None
+    log.info("MP3 from catalogue site: %s - %s", tr.artist, tr.title)
+    return AudioFile(path=path, title=tr.title or title, performer=tr.artist or artist,
+                     duration=int(info.get("duration") or tr.duration or 0), thumb=thumb)
 
 
 # ---------------------------------------------------------------- audio

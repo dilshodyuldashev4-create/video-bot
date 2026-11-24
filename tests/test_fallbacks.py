@@ -21,7 +21,8 @@ class FakeYDL:
         return False
 
     def extract_info(self, url, download=True):
-        FakeYDL.calls.append({"url": url, "proxy": self.opts.get("proxy")})
+        client = ((self.opts.get("extractor_args") or {}).get("youtube") or {}).get("player_client")
+        FakeYDL.calls.append({"url": url, "proxy": self.opts.get("proxy"), "client": client})
         if FakeYDL.fail_direct and not self.opts.get("proxy"):
             raise yt_dlp.utils.DownloadError(BOT_CHECK)
         return {"id": "x", "title": "ok"}
@@ -33,6 +34,7 @@ def _setup(monkeypatch, proxy="socks5://warp:1080"):
     monkeypatch.setattr(downloader.yt_dlp, "YoutubeDL", FakeYDL)
     monkeypatch.setattr(config, "proxy", proxy)
     downloader._proxy_first_until.clear()
+    monkeypatch.setattr(downloader, "_yt_blocked_until", 0.0)
 
 
 def test_falls_back_to_proxy_and_remembers(monkeypatch):
@@ -59,7 +61,29 @@ def test_no_proxy_configured_raises_original_error(monkeypatch):
         assert "not a bot" in str(e)
     else:
         raise AssertionError("should raise")
-    assert len(FakeYDL.calls) == 1
+    # default client, then the other player clients; then YouTube is paused
+    assert [c["client"] for c in FakeYDL.calls] == [None, ["tv_simply"], ["mweb"], ["web_safari"]]
+    assert downloader.youtube_blocked()
+
+
+def test_other_player_client_passes_bot_check(monkeypatch):
+    _setup(monkeypatch, proxy="")
+
+    class MwebWorks(FakeYDL):
+        def extract_info(self, url, download=True):
+            super_calls = FakeYDL.calls
+            client = ((self.opts.get("extractor_args") or {}).get("youtube") or {}).get("player_client")
+            super_calls.append(client)
+            if client != ["mweb"]:
+                raise yt_dlp.utils.DownloadError(BOT_CHECK)
+            return {"title": "ok"}
+
+    monkeypatch.setattr(downloader.yt_dlp, "YoutubeDL", MwebWorks)
+    opts = {"extractor_args": {"youtubepot-bgutilhttp": {"base_url": ["http://pot:4416"]}}}
+    assert downloader._extract("https://youtu.be/U3kf72Zw3yA", opts)["title"] == "ok"
+    assert FakeYDL.calls == [None, ["tv_simply"], ["mweb"]]
+    assert "youtube" not in opts["extractor_args"]  # caller's opts untouched
+    assert not downloader.youtube_blocked()
 
 
 def test_permanent_errors_are_not_retried(monkeypatch):

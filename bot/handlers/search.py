@@ -5,7 +5,7 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, Message
 
-from ..common import react, send_soundcloud, send_track, user_lock
+from ..common import react, send_song, send_track, split_query, user_lock
 from ..db import DB
 from .library import header_for, send_liked
 from ..keyboards import PAGE_SIZE, results_kb, results_text
@@ -91,11 +91,5 @@ async def cb_track(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
 
 
 async def send_by_query(bot: Bot, db: DB, chat_id: int, query: str, lang: str) -> None:
-    artist, _, title = query.partition(" - ")
-    if not title:
-        artist, title = "", query
-    track = await downloader.find_best(title, artist)
-    if track:
-        await send_track(bot, db, chat_id, track.id, lang, query=query)
-    else:
-        await send_soundcloud(bot, db, chat_id, query, lang)
+    title, artist = split_query(query)
+    await send_song(bot, db, chat_id, title, artist, lang)

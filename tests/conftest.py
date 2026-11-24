@@ -42,3 +42,15 @@ def data_dir(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cfg.config, "data_dir", tmp_path, raising=False)
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def no_mp3_sites(monkeypatch):
+    """Tests never touch the real MP3 catalogue sites (individual tests override this)."""
+    from bot.services import downloader, mp3sites
+
+    def offline(query):
+        raise RuntimeError("all mp3 mirrors failed: offline in tests")
+
+    monkeypatch.setattr(mp3sites, "search_sync", offline)
+    monkeypatch.setattr(downloader, "_yt_blocked_until", 0.0)

@@ -8,9 +8,8 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, Message
 
-from ..common import react, send_soundcloud, send_track, user_lock
+from ..common import react, send_song, user_lock
 from ..config import config
-from ..keyboards import shazam_kb
 from ..db import DB
 from ..services import downloader, recognizer
 from ..services.recognizer import Song
@@ -58,13 +57,8 @@ async def _deliver(message: Message, bot: Bot, db: DB, lang: str, song: Song | N
     card_text = t(lang, "recognized_card", title=esc(song.title), artist=esc(song.artist))
     card = await _send_card(message, song, card_text, lang)
     header = t(lang, "recognized_header")
-    track = await downloader.find_best(song.title, song.artist)
     try:
-        if track:
-            await send_track(bot, db, message.chat.id, track.id, lang, header=header,
-                             reply_to=message.message_id, query=song.query)
-        else:  # YouTube search unavailable -> straight to SoundCloud
-            await send_soundcloud(bot, db, message.chat.id, song.query, lang, header, message.message_id)
+        await send_song(bot, db, message.chat.id, song.title, song.artist, lang, header, message.message_id)
     except downloader.DownloadFailed:
         await message.reply(t(lang, "song_not_found_dl", title=esc(song.title), artist=esc(song.artist)))
     finally:
@@ -73,8 +67,8 @@ async def _deliver(message: Message, bot: Bot, db: DB, lang: str, song: Song | N
 
 
 async def _send_card(message: Message, song: Song, text: str, lang: str) -> Message | None:
-    """Shazam-style card: cover art + title + artist (+ "Open in Shazam")."""
-    kb = shazam_kb(song.shazam_url, lang)
+    """Shazam-style card: cover art + title + artist."""
+    kb = None
     try:
         if song.cover:
             return await message.reply_photo(song.cover, caption=text, reply_markup=kb)

@@ -1,6 +1,8 @@
 """End-to-end handler flows with a fake Telegram API (no network)."""
 import datetime
 import shutil
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -181,11 +183,11 @@ async def test_link_video_then_song_button(env, monkeypatch, http_base, fake_aud
         assert Path(path).exists()
         return recognizer.Song("Dior", "Pop Smoke")
 
-    async def fake_best(title, artist):
-        return downloader.Track(id="oorVWW9ywG0", title="POP SMOKE - DIOR (OFFICIAL VIDEO)")
+    async def fake_search(q, limit=30):
+        return [downloader.Track(id="oorVWW9ywG0", title="POP SMOKE - DIOR (OFFICIAL VIDEO)")]
 
     monkeypatch.setattr(recognizer, "recognize", fake_rec)
-    monkeypatch.setattr(downloader, "find_best", fake_best)
+    monkeypatch.setattr(downloader, "search", fake_search)
     await press(btn.callback_data)
     audio = session.of(SendAudio)[-1]
     assert "Найдено по звуку" in audio.caption
@@ -217,7 +219,7 @@ async def test_voice_recognition_and_failure(env, monkeypatch, media_dir, fake_a
     assert "Не смог узнать" in session.of(SendMessage)[-1].text
 
     monkeypatch.setattr(recognizer, "recognize", lambda p: _async(recognizer.Song("Dior", "Pop Smoke")))
-    monkeypatch.setattr(downloader, "find_best", lambda t, a: _async(downloader.Track(id="abc", title="Dior")))
+    monkeypatch.setattr(downloader, "search", lambda q, limit=30: _async([downloader.Track(id="abc", title="Dior")]))
     from aiogram.types import Voice
     await send_media(voice=Voice(file_id="v", file_unique_id="u", duration=10))
     assert session.of(SendAudio)
@@ -322,11 +324,11 @@ async def test_shazam_card_with_cover(env, monkeypatch, media_dir, data_dir, fak
     monkeypatch.setattr(rec_handler, "_fetch", fake_fetch)
     monkeypatch.setattr(recognizer, "recognize", lambda p: _async(recognizer.Song(
         "Dior", "Pop Smoke", cover="https://is1.example/cover.jpg", shazam_url="https://www.shazam.com/track/1")))
-    monkeypatch.setattr(downloader, "find_best", lambda t, a: _async(downloader.Track(id="cov", title="Dior")))
+    monkeypatch.setattr(downloader, "search", lambda q, limit=30: _async([downloader.Track(id="cov", title="Dior")]))
     await send_media(video=Video(file_id="x", file_unique_id="u", width=1, height=1, duration=30))
     photo = session.of(SendPhoto)[-1]
     assert photo.photo == "https://is1.example/cover.jpg" and "Shazam нашёл" in photo.caption
-    assert photo.reply_markup.inline_keyboard[0][0].url == "https://www.shazam.com/track/1"
+    assert photo.reply_markup is None  # no "Open in Shazam" button
     from aiogram.methods import EditMessageCaption, SetMessageReaction
     assert "Качаю MP3" not in session.of(EditMessageCaption)[-1].caption
     reactions = [r.reaction[0].emoji for r in session.of(SetMessageReaction)]
@@ -344,17 +346,17 @@ async def test_charts_menu_and_pick(env, monkeypatch, fake_audio):
     monkeypatch.setattr(charts, "get_chart", fake_chart)
     found = []
 
-    async def fake_best(title, artist):
-        found.append((artist, title))
-        return downloader.Track(id="uzhit", title=f"{artist} - {title}")
+    async def fake_search(q, limit=30):
+        found.append(q)
+        return [downloader.Track(id="uzhit", title="Pop Smoke - Dior")]
 
-    monkeypatch.setattr(downloader, "find_best", fake_best)
+    monkeypatch.setattr(downloader, "search", fake_search)
     await send_text("🇺🇿 Топ UZ")
     edit = session.of(EditMessageText)[-1]
     assert "Топ Узбекистана" in edit.text and "<b>2.</b> Pop Smoke - Dior" in edit.text
     sid = edit.reply_markup.inline_keyboard[0][0].callback_data.split(":")[1]
     await press(f"t:{sid}:1")
-    assert found == [("Pop Smoke", "Dior")] and fake_audio == ["uzhit"]
+    assert found == ["Pop Smoke - Dior"] and fake_audio == ["uzhit"]
     await press(f"p:{sid}:0")  # paging keeps the chart header (same page -> not modified is fine)
 
 
@@ -484,3 +486,94 @@ async def test_english_language(env):
     assert sent.reply_markup.keyboard[0][0].text == "🔥 Top of the week"
     await send_text("❓ Help")
     assert "How it works" in session.of(SendMessage)[-1].text
+
+
+async def test_shazam_always_tries_other_sources(env, monkeypatch, http_base, media_dir, data_dir):
+    """The screenshot bug: Shazam found the song but the first YouTube video failed -> no MP3."""
+    session, _, _, _, send_media = env
+
+    async def fake_fetch(bot, file_id, size):
+        d = data_dir / "in3"
+        d.mkdir(exist_ok=True)
+        shutil.copy(media_dir / "clip.mp4", d / "input")
+        return d / "input"
+
+    searches, downloads = [], []
+
+    async def fake_search(q, limit=30):
+        searches.append(q)
+        return [
+            downloader.Track(id="geolock", title="UzBoom - Kecholmadim (Official Video)"),
+            downloader.Track(id="other", title="Kecholmadim - UzBoom (audio)"),
+            downloader.Track(id="unrelated", title="Some other song"),
+        ]
+
+    real = downloader.download_audio
+
+    async def fake_download(video_id, url=None):
+        downloads.append(video_id)
+        if video_id == "geolock":
+            raise downloader.DownloadFailed("Video unavailable. This video is not available in your country")
+        return await real(video_id, url=f"{http_base}/clip.mp4")
+
+    monkeypatch.setattr(rec_handler, "_fetch", fake_fetch)
+    monkeypatch.setattr(recognizer, "recognize", lambda p: _async(recognizer.Song("Kecholmadim", "UzBoom")))
+    monkeypatch.setattr(downloader, "search", fake_search)
+    monkeypatch.setattr(downloader, "download_audio", fake_download)
+    await send_media(voice=__import__("aiogram").types.Voice(file_id="v", file_unique_id="u", duration=10))
+    assert downloads == ["geolock", "other"]  # unrelated result is never tried
+    assert session.of(SendAudio), "MP3 must be sent"
+    card = session.of(SendMessage)[-1]
+    assert card.reply_markup is None  # no "Open in Shazam" button
+    assert not any("не удалось" in (m.text or "") for m in session.of(SendMessage))
+
+
+async def test_youtube_blocked_mp3_comes_from_catalogue_site(env, monkeypatch, media_dir, data_dir):
+    """Live bug: YouTube says "Sign in to confirm you're not a bot" on every route ->
+    the MP3 must come from an MP3 catalogue site, without hammering YouTube."""
+    from bot.services import mp3sites
+
+    session, _, _, _, send_media = env
+    mp3 = media_dir / "song.mp3"
+    if not mp3.exists():
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=330:duration=40",
+                        "-b:a", "128k", str(mp3)], check=True)
+
+    async def fake_fetch(bot, file_id, size):
+        d = data_dir / "in4"
+        d.mkdir(exist_ok=True)
+        shutil.copy(media_dir / "clip.mp4", d / "input")
+        return d / "input"
+
+    yt_downloads, site_queries = [], []
+
+    async def blocked_download(video_id, url=None):
+        yt_downloads.append(video_id)
+        monkeypatch.setattr(downloader, "_yt_blocked_until", time.time() + 900)
+        raise downloader.DownloadFailed("Sign in to confirm you're not a bot")
+
+    async def fake_search(q, limit=30):
+        return [downloader.Track(id="a", title="UzBoom - Kecholmadim")]
+
+    def site_search(q):
+        site_queries.append(q)
+        return [mp3sites.SiteTrack("Other", "Boshqa qo'shiq", "http://x/1.mp3"),
+                mp3sites.SiteTrack("UzBoom", "Kecholmadim", "http://x/2.mp3")], "http://x"
+
+    def site_download(tr, referer, workdir):
+        assert tr.url == "http://x/2.mp3"
+        shutil.copy(mp3, workdir / "song.mp3")
+        return workdir / "song.mp3", None
+
+    monkeypatch.setattr(rec_handler, "_fetch", fake_fetch)
+    monkeypatch.setattr(recognizer, "recognize", lambda p: _async(recognizer.Song("Kecholmadim", "UzBoom")))
+    monkeypatch.setattr(downloader, "search", fake_search)
+    monkeypatch.setattr(downloader, "download_audio", blocked_download)
+    monkeypatch.setattr(mp3sites, "search_sync", site_search)
+    monkeypatch.setattr(mp3sites, "download_sync", site_download)
+    await send_media(voice=__import__("aiogram").types.Voice(file_id="v", file_unique_id="u", duration=10))
+    audio = session.of(SendAudio)
+    assert audio, "MP3 must be sent"
+    assert audio[-1].performer == "UzBoom" and audio[-1].title == "Kecholmadim"
+    assert len(yt_downloads) <= 1  # YouTube is not retried 5 times once it is known to be blocked
+    assert not any("не удалось" in (m.text or "") for m in session.of(SendMessage))
