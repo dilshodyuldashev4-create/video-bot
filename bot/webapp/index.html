@@ -7,243 +7,568 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root {
-    --bg: var(--tg-theme-bg-color, #0f0f14);
-    --bg2: var(--tg-theme-secondary-bg-color, #1b1b24);
-    --text: var(--tg-theme-text-color, #ffffff);
-    --hint: var(--tg-theme-hint-color, #8d8d99);
-    --accent: var(--tg-theme-button-color, #ff2e63);
-    --accent-text: var(--tg-theme-button-text-color, #ffffff);
-    --sep: color-mix(in srgb, var(--hint) 20%, transparent);
+    --bg: #07060d;
+    --glass: rgba(255,255,255,.07);
+    --glass2: rgba(255,255,255,.12);
+    --line: rgba(255,255,255,.10);
+    --text: #fff;
+    --hint: rgba(255,255,255,.58);
+    --a1: #ff2e63; --a2: #7b2ff7; --a3: #00d4ff;
+    --safe-b: env(safe-area-inset-bottom);
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  body { padding: 0 16px calc(120px + env(safe-area-inset-bottom)); }
-  header { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 12px 0 8px; }
-  h1 { font-size: 22px; margin: 4px 0 12px; }
-  .search { display: flex; gap: 8px; }
-  .search input { flex: 1; min-width: 0; border: 0; border-radius: 12px; padding: 12px 14px; font-size: 16px;
-    background: var(--bg2); color: var(--text); outline: none; }
-  .tabs { display: flex; gap: 6px; margin-top: 10px; }
-  .tab { flex: 1; border: 0; border-radius: 10px; padding: 9px 4px; background: var(--bg2); color: var(--text);
-    font-size: 14px; }
-  .tab.on { background: var(--accent); color: var(--accent-text); }
-  .list { margin-top: 6px; }
-  .row { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--sep); }
-  .row .n { width: 22px; text-align: center; color: var(--hint); font-variant-numeric: tabular-nums; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); overscroll-behavior: none;
+    font: 15px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif; }
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; padding: 0; }
+
+  /* living background: blurred blobs tinted by the current track */
+  .bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+  .blob { position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%; filter: blur(70px); opacity: .5;
+    transition: background 1.2s ease; will-change: transform; }
+  .b1 { background: var(--a1); top: -32vmax; left: -25vmax; animation: drift1 18s ease-in-out infinite alternate; }
+  .b2 { background: var(--a2); bottom: -38vmax; right: -30vmax; animation: drift2 22s ease-in-out infinite alternate; }
+  .b3 { background: var(--a3); top: 35%; left: 45%; width: 45vmax; height: 45vmax; opacity: .25;
+    animation: drift3 26s ease-in-out infinite alternate; }
+  @keyframes drift1 { to { transform: translate(18vmax, 22vmax) scale(1.15); } }
+  @keyframes drift2 { to { transform: translate(-20vmax, -14vmax) scale(1.2); } }
+  @keyframes drift3 { to { transform: translate(-30vmax, 10vmax) scale(.85); } }
+  .grain { position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: .05;
+    background-image: radial-gradient(rgba(255,255,255,.8) 1px, transparent 1px); background-size: 3px 3px; }
+
+  .app { position: relative; z-index: 1; padding: 0 16px calc(110px + var(--safe-b)); max-width: 560px; margin: 0 auto; }
+  header { position: sticky; top: 0; z-index: 5; padding: 14px 16px 10px; margin: 0 -16px;
+    background: linear-gradient(var(--bg) 55%, rgba(7,6,13,0)); }
+  .hello { font-size: 13px; color: var(--hint); letter-spacing: .3px; }
+  h1 { margin: 2px 0 12px; font-size: 30px; font-weight: 800; letter-spacing: -.6px;
+    background: linear-gradient(90deg, #fff, #ffd3e0 45%, #c9b6ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+  .glass { background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(22px) saturate(160%);
+    -webkit-backdrop-filter: blur(22px) saturate(160%); }
+
+  .search { display: flex; align-items: center; gap: 10px; border-radius: 16px; padding: 0 14px; height: 48px; margin: 0; }
+  .search input { flex: 1; min-width: 0; border: 0; background: none; color: var(--text); font-size: 16px; outline: none; }
+  .search input::placeholder { color: var(--hint); }
+
+  .tabs { position: relative; display: flex; margin-top: 12px; border-radius: 14px; padding: 4px; }
+  .tab { flex: 1; position: relative; z-index: 1; padding: 9px 4px; font-size: 14px; font-weight: 650; color: var(--hint);
+    transition: color .25s; }
+  .tab.on { color: #fff; }
+  .pill { position: absolute; z-index: 0; top: 4px; bottom: 4px; left: 4px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--a1), var(--a2)); box-shadow: 0 6px 18px rgba(0,0,0,.35);
+    transition: transform .35s cubic-bezier(.3,1.4,.5,1), width .35s, background 1s; }
+
+  .view { animation: rise .35s ease both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+  .row { display: flex; align-items: center; gap: 12px; padding: 8px; margin: 2px -8px; border-radius: 14px;
+    transition: background .2s, transform .15s; animation: rise .4s ease both; }
+  .row:active { transform: scale(.98); background: var(--glass); }
+  .row.playing { background: var(--glass2); }
+  .cover { position: relative; flex: none; width: 52px; height: 52px; border-radius: 12px; overflow: hidden;
+    display: grid; place-items: center; font-weight: 800; font-size: 20px; color: rgba(255,255,255,.92);
+    box-shadow: 0 6px 16px rgba(0,0,0,.35); }
+  .cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .row .t { flex: 1; min-width: 0; }
-  .row .t b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .row .t span { color: var(--hint); font-size: 13px; }
-  .row.playing .t b { color: var(--accent); }
-  .row .go { width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--bg2); color: var(--text);
-    font-size: 15px; flex: none; }
-  .pl { padding: 14px; border-radius: 14px; background: var(--bg2); margin: 10px 0; }
-  .pl b { font-size: 16px; } .pl span { color: var(--hint); }
-  .empty { color: var(--hint); text-align: center; padding: 40px 10px; }
-  .back { border: 0; background: none; color: var(--accent); font-size: 15px; padding: 8px 0; }
-  .player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; background: var(--bg2);
-    padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); box-shadow: 0 -6px 20px rgba(0,0,0,.25);
-    transform: translateY(110%); transition: transform .25s; }
-  .player.show { transform: none; }
-  .player .now { display: flex; align-items: center; gap: 10px; }
-  .player .now .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    font-weight: 600; }
-  .player button { border: 0; background: none; color: var(--text); font-size: 22px; width: 40px; height: 40px; }
-  .player .pp { background: var(--accent); color: var(--accent-text); border-radius: 50%; font-size: 18px; }
-  .bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: var(--hint); font-size: 12px;
-    font-variant-numeric: tabular-nums; }
-  .bar input { flex: 1; accent-color: var(--accent); }
-  .toast { position: fixed; left: 16px; right: 16px; top: 12px; z-index: 20; background: var(--text);
-    color: var(--bg); padding: 10px 14px; border-radius: 12px; opacity: 0; transition: opacity .2s;
-    pointer-events: none; text-align: center; }
-  .toast.show { opacity: .95; }
-  .spin { display: inline-block; animation: spin 1s linear infinite; }
+  .row .t b { display: block; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .t span { display: block; color: var(--hint); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row.playing .t b { color: #ff9cbc; }
+  .eq { display: flex; gap: 2px; align-items: flex-end; height: 16px; }
+  .eq i { width: 3px; background: #ff9cbc; border-radius: 2px; animation: eq .9s ease-in-out infinite; }
+  .eq i:nth-child(2) { animation-delay: -.3s; } .eq i:nth-child(3) { animation-delay: -.6s; }
+  .paused .eq i { animation-play-state: paused; }
+  @keyframes eq { 0%,100% { height: 4px; } 50% { height: 16px; } }
+  .dur { color: var(--hint); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  .hero { display: flex; gap: 8px; align-items: center; margin: 12px 0 6px; }
+  .chip { padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 650; white-space: nowrap; }
+  .chip.hot { background: linear-gradient(135deg, var(--a1), var(--a2)); box-shadow: 0 6px 18px rgba(0,0,0,.3); }
+  .moods { display: flex; gap: 8px; overflow-x: auto; margin: 4px -16px 6px; padding: 4px 16px 6px; scrollbar-width: none; }
+  .moods::-webkit-scrollbar { display: none; }
+  .moods .chip { flex: none; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .card { border-radius: 20px; padding: 14px; min-height: 130px; position: relative; overflow: hidden; display: flex;
+    flex-direction: column; justify-content: flex-end; animation: rise .4s ease both; transition: transform .15s; }
+  .card:active { transform: scale(.97); }
+  .card .art { position: absolute; inset: 0; }
+  .card .art::after { content: "♫"; position: absolute; right: 12px; top: 6px; font-size: 44px; opacity: .25; }
+  .card b, .card span { position: relative; text-shadow: 0 2px 10px rgba(0,0,0,.45); }
+  .card b { font-size: 16px; } .card span { font-size: 12px; color: rgba(255,255,255,.85); }
+
+  .empty { color: var(--hint); text-align: center; padding: 48px 20px; }
+  .empty b { color: var(--text); }
+  .empty .big { font-size: 52px; display: block; margin-bottom: 10px; animation: float 3s ease-in-out infinite; }
+  @keyframes float { 50% { transform: translateY(-8px); } }
+  .skel { height: 60px; border-radius: 14px; margin: 8px 0; background: linear-gradient(90deg, var(--glass) 25%, var(--glass2) 50%, var(--glass) 75%);
+    background-size: 200% 100%; animation: shimmer 1.2s infinite; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  .back { color: #ff9cbc; padding: 6px 0; font-weight: 650; }
+
+  /* mini player */
+  .mini { position: fixed; z-index: 10; left: 10px; right: 10px; bottom: calc(10px + var(--safe-b)); border-radius: 20px;
+    padding: 8px 8px 8px 8px; display: flex; align-items: center; gap: 10px; transform: translateY(160%);
+    transition: transform .45s cubic-bezier(.3,1.3,.5,1); overflow: hidden; max-width: 540px; margin: 0 auto;
+    background: rgba(24,18,40,.62); box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  .mini.show { transform: none; }
+  .mini .cover { width: 46px; height: 46px; }
+  .spin-art { animation: spin 8s linear infinite; border-radius: 50% !important; }
+  .paused .spin-art { animation-play-state: paused; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .mini .t { flex: 1; min-width: 0; }
+  .mini .t b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+  .mini .t span { display: block; color: var(--hint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mini .prog { position: absolute; left: 0; bottom: 0; height: 3px; width: 0; background: linear-gradient(90deg, var(--a1), var(--a3)); }
+  .ibtn { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+  .ibtn svg { width: 22px; height: 22px; fill: currentColor; }
+  .ibtn.main { background: #fff; color: #111; }
+
+  /* full screen "now playing" */
+  .full { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center;
+    padding: 12px 24px calc(26px + var(--safe-b)); transform: translateY(105%); transition: transform .45s cubic-bezier(.2,1,.3,1);
+    background: rgba(8,6,16,.6); backdrop-filter: blur(40px) saturate(180%); -webkit-backdrop-filter: blur(40px) saturate(180%); }
+  .full.show { transform: none; }
+  .grab { width: 40px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.3); margin-bottom: 6px; flex: none; }
+  .full .top { width: 100%; display: flex; justify-content: space-between; align-items: center; color: var(--hint); font-size: 13px;
+    text-transform: uppercase; letter-spacing: 1.2px; }
+  .stage { position: relative; flex: 1; width: 100%; display: grid; place-items: center; min-height: 0; }
+  .vinyl { position: relative; width: min(70vw, 40vh, 340px); aspect-ratio: 1; border-radius: 50%;
+    background: repeating-radial-gradient(circle, #121212 0 2px, #1d1d1d 2px 4px);
+    box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.06) inset; transition: transform .3s; }
+  .disc { position: absolute; inset: 0; border-radius: 50%; animation: spin 6s linear infinite; }
+  .paused .disc { animation-play-state: paused; }
+  .vinyl::after { content: ""; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+    background: conic-gradient(from 20deg, transparent 0 10%, rgba(255,255,255,.12) 14%, transparent 20% 60%, rgba(255,255,255,.08) 66%, transparent 72%); }
+  .label { position: absolute; inset: 26%; border-radius: 50%; overflow: hidden; display: grid; place-items: start center;
+    padding-top: 14%; font-size: 26px; font-weight: 800; box-shadow: 0 0 0 4px #0b0b0b; }
+  .label img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .hole { position: absolute; width: 5%; aspect-ratio: 1; border-radius: 50%; background: #0b0b0b; left: 47.5%; top: 47.5%; z-index: 2; }
+  canvas.viz { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .meta { width: 100%; margin-top: 6px; }
+  .meta b { display: block; font-size: 24px; font-weight: 800; letter-spacing: -.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta span { color: var(--hint); font-size: 16px; }
+  .seek { width: 100%; margin-top: 16px; padding: 8px 0; touch-action: none; }
+  .track { position: relative; height: 6px; border-radius: 3px; background: rgba(255,255,255,.15); }
+  .track .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; width: 0;
+    background: linear-gradient(90deg, var(--a1), var(--a2), var(--a3)); }
+  .track .knob { position: absolute; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: #fff;
+    box-shadow: 0 0 14px rgba(255,255,255,.6); left: 0; }
+  .times { display: flex; justify-content: space-between; color: var(--hint); font-size: 12px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .controls { width: 100%; display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+  .controls .ibtn { width: 52px; height: 52px; }
+  .controls .ibtn svg { width: 28px; height: 28px; }
+  .controls .main { width: 76px; height: 76px; box-shadow: 0 10px 30px rgba(255,255,255,.22); }
+  .controls .main svg { width: 34px; height: 34px; }
+  .toggle { opacity: .45; } .toggle.on { opacity: 1; color: #ff9cbc; }
+  .hintswipe { color: var(--hint); font-size: 12px; margin-top: 10px; text-align: center; }
+
+  .toast { position: fixed; left: 16px; right: 16px; top: 14px; z-index: 30; padding: 12px 16px; border-radius: 14px;
+    text-align: center; transform: translateY(-160%); transition: transform .35s cubic-bezier(.3,1.3,.5,1); pointer-events: none;
+    background: rgba(30,24,46,.8); }
+  .toast.show { transform: none; }
+  @media (prefers-reduced-motion: reduce) { .blob, .disc, .spin-art { animation: none !important; } }
 </style>
 </head>
-<body>
-<header>
-  <h1 id="title">🎧</h1>
-  <form class="search" id="form"><input id="q" type="search" autocomplete="off" enterkeyhint="search"></form>
-  <div class="tabs">
-    <button class="tab on" data-tab="search" id="tab-search"></button>
-    <button class="tab" data-tab="likes" id="tab-likes"></button>
-    <button class="tab" data-tab="playlists" id="tab-playlists"></button>
-  </div>
-</header>
-<main class="list" id="list"></main>
+<body class="paused">
+<div class="bg"><div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div></div>
+<div class="grain"></div>
 
-<div class="player" id="player">
-  <div class="now">
-    <div class="t" id="now">—</div>
-    <button id="prev" aria-label="prev">⏮</button>
-    <button id="pp" class="pp" aria-label="play">▶</button>
-    <button id="next" aria-label="next">⏭</button>
-  </div>
-  <div class="bar"><span id="cur">0:00</span><input id="seek" type="range" min="0" max="100" value="0" step="0.1"><span id="dur">0:00</span></div>
+<div class="app">
+  <header>
+    <div class="hello" id="hello"></div>
+    <h1 id="title">🎧</h1>
+    <form class="search glass" id="form">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" opacity=".6"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" autocomplete="off" enterkeyhint="search">
+    </form>
+    <div class="tabs glass" id="tabs">
+      <div class="pill" id="pill"></div>
+      <button class="tab on" data-tab="search" id="tab-search"></button>
+      <button class="tab" data-tab="likes" id="tab-likes"></button>
+      <button class="tab" data-tab="playlists" id="tab-playlists"></button>
+    </div>
+  </header>
+  <main id="list"></main>
 </div>
-<div class="toast" id="toast"></div>
-<audio id="audio" preload="auto"></audio>
+
+<div class="mini glass" id="mini">
+  <div id="mini-cover"></div>
+  <div class="t"><b id="mini-title">—</b><span id="mini-artist"></span></div>
+  <button class="ibtn main" id="mini-pp" aria-label="play"></button>
+  <button class="ibtn" id="mini-next" aria-label="next"></button>
+  <div class="prog" id="mini-prog"></div>
+</div>
+
+<section class="full" id="full">
+  <div class="grab"></div>
+  <div class="top"><button class="ibtn" id="close" aria-label="close"></button><span id="from"></span><span style="width:42px"></span></div>
+  <div class="stage" id="stage">
+    <canvas class="viz" id="viz"></canvas>
+    <div class="vinyl" id="vinyl"><div class="disc"><div class="label" id="label"></div></div><div class="hole"></div></div>
+  </div>
+  <div class="meta"><b id="full-title">—</b><span id="full-artist"></span></div>
+  <div class="seek" id="seek">
+    <div class="track"><div class="fill" id="fill"></div><div class="knob" id="knob"></div></div>
+    <div class="times"><span id="cur">0:00</span><span id="dur">0:00</span></div>
+  </div>
+  <div class="controls">
+    <button class="ibtn toggle" id="shuffle" aria-label="shuffle"></button>
+    <button class="ibtn" id="prev" aria-label="prev"></button>
+    <button class="ibtn main" id="pp" aria-label="play"></button>
+    <button class="ibtn" id="next" aria-label="next"></button>
+    <button class="ibtn toggle" id="repeat" aria-label="repeat"></button>
+  </div>
+  <div class="hintswipe" id="swipehint"></div>
+</section>
+<div class="toast glass" id="toast"></div>
+<audio id="audio" preload="auto" playsinline></audio>
 
 <script>
 const tg = window.Telegram && window.Telegram.WebApp;
 const init = tg ? tg.initData : "";
-if (tg) { tg.ready(); tg.expand(); }
+if (tg) { tg.ready(); tg.expand(); try { tg.setHeaderColor("#07060d"); tg.setBackgroundColor("#07060d"); } catch (e) {} }
+function haptic(kind) {
+  try {
+    const h = tg && tg.HapticFeedback; if (!h) return;
+    kind === "ok" ? h.notificationOccurred("success") : h.impactOccurred(kind || "light");
+  } catch (e) {}
+}
+
+const NEXT = '<path d="M5 6.2v11.6a1 1 0 0 0 1.55.83L14.5 13v4.8a1 1 0 0 0 1.55.83l.15-.1V6.47a1 1 0 0 0-1.7-.71L14.5 6v5L6.55 5.37A1 1 0 0 0 5 6.2z"/><rect x="17" y="5" width="2.6" height="14" rx="1.2"/>';
+const ICON = {
+  play: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4.2" height="14" rx="1.3"/><rect x="13.8" y="5" width="4.2" height="14" rx="1.3"/></svg>',
+  next: `<svg viewBox="0 0 24 24">${NEXT}</svg>`,
+  prev: `<svg viewBox="0 0 24 24" style="transform:scaleX(-1)">${NEXT}</svg>`,
+  down: '<svg viewBox="0 0 24 24"><path d="M5.3 8.8a1 1 0 0 1 1.4 0L12 14.1l5.3-5.3a1 1 0 1 1 1.4 1.4l-6 6a1 1 0 0 1-1.4 0l-6-6a1 1 0 0 1 0-1.4z"/></svg>',
+  shuffle: '<svg viewBox="0 0 24 24"><path d="M17 4l4 3.5-4 3.5V8.5h-1.6a3 3 0 0 0-2.5 1.34l-4.4 6.6A5 5 0 0 1 4.3 18.7H3v-2h1.3a3 3 0 0 0 2.5-1.34l4.4-6.6A5 5 0 0 1 15.4 6.5H17zM3 7.3h1.3a5 5 0 0 1 4 2l-1.2 1.8a3 3 0 0 0-2.8-1.8H3zm12.4 9.2H17V15l4 3.5-4 3.5v-2.5h-1.6a5 5 0 0 1-4-2l1.2-1.8a3 3 0 0 0 2.8 1.8z"/></svg>',
+  repeat: '<svg viewBox="0 0 24 24"><path d="M7 7h10.2l-1.6-1.6L17 4l4 4-4 4-1.4-1.4L17.2 9H7a2 2 0 0 0-2 2v1H3v-1a4 4 0 0 1 4-4zm14 5v1a4 4 0 0 1-4 4H6.8l1.6 1.6L7 20l-4-4 4-4 1.4 1.4L6.8 15H17a2 2 0 0 0 2-2v-1z"/></svg>',
+};
 
 const L = {
-  ru: {title: "🎧 Плеер", q: "Песня или исполнитель", search: "🔎 Поиск", likes: "❤️ Моё", playlists: "📂 Плейлисты",
-       hint: "Напиши название песни 👆", none: "Ничего не нашлось", likesEmpty: "Нажми ❤️ под треком в боте, и он появится здесь",
-       plEmpty: "Плейлистов пока нет. Создай их кнопкой «📂 В плейлист» под треком", tracks: "треков", back: "← Назад",
-       loading: "Загружаю…", sent: "Трек также пришёл в чат с ботом 💾", err: "Не получилось, попробуй ещё раз"},
-  uz: {title: "🎧 Pleyer", q: "Qo'shiq yoki ijrochi", search: "🔎 Qidiruv", likes: "❤️ Meniki", playlists: "📂 Pleylistlar",
-       hint: "Qo'shiq nomini yozing 👆", none: "Hech narsa topilmadi", likesEmpty: "Botda trek ostidagi ❤️ ni bosing, u shu yerda paydo bo'ladi",
-       plEmpty: "Hozircha pleylist yo'q. Trek ostidagi «📂 Pleylistga» tugmasi bilan yarating", tracks: "ta trek", back: "← Orqaga",
-       loading: "Yuklanmoqda…", sent: "Trek bot chatiga ham yuborildi 💾", err: "Bo'lmadi, yana urinib ko'ring"},
-  en: {title: "🎧 Player", q: "Song or artist", search: "🔎 Search", likes: "❤️ Mine", playlists: "📂 Playlists",
-       hint: "Type a song name 👆", none: "Nothing found", likesEmpty: "Tap ❤️ under a track in the bot and it shows up here",
-       plEmpty: "No playlists yet. Create one with «📂 To playlist» under a track", tracks: "tracks", back: "← Back",
-       loading: "Loading…", sent: "The track also arrived in your chat with the bot 💾", err: "Didn't work, try again"},
+  ru: {title: "Твоя музыка", q: "Песня, артист или вайб…", search: "Поиск", likes: "Моё", playlists: "Плейлисты",
+       hint: "Найди любую песню", hint2: "Пиши название или артиста, или выбери вайб сверху", none: "Ничего не нашлось 🙈",
+       likesEmpty: "Нажми ❤️ под треком в боте, и он появится здесь", plEmpty: "Создай плейлист кнопкой «📂 В плейлист» под треком",
+       tracks: "треков", back: "← Все плейлисты", sent: "Трек также пришёл в чат 💾", err: "Не получилось, попробуй ещё раз",
+       playAll: "▶ Слушать все", shuffleAll: "🔀 Вперемешку", morning: "Доброе утро", day: "Добрый день", evening: "Добрый вечер",
+       night: "Не спится?", swipe: "свайп ← → переключает трек · вниз сворачивает", nowFrom: "Сейчас играет",
+       moods: ["🔥 Хиты", "🚗 В машину", "😢 Грустное", "🏋️ Для зала", "💃 Той", "🌙 Чилл"]},
+  uz: {title: "Sening musiqang", q: "Qo'shiq, ijrochi yoki kayfiyat…", search: "Qidiruv", likes: "Meniki", playlists: "Pleylistlar",
+       hint: "Istalgan qo'shiqni toping", hint2: "Nomini yoki ijrochini yozing yoki yuqoridan kayfiyat tanlang", none: "Hech narsa topilmadi 🙈",
+       likesEmpty: "Botda trek ostidagi ❤️ ni bosing, u shu yerda paydo bo'ladi", plEmpty: "Trek ostidagi «📂 Pleylistga» tugmasi bilan pleylist yarating",
+       tracks: "ta trek", back: "← Barcha pleylistlar", sent: "Trek chatga ham yuborildi 💾", err: "Bo'lmadi, yana urinib ko'ring",
+       playAll: "▶ Hammasini tinglash", shuffleAll: "🔀 Aralash", morning: "Xayrli tong", day: "Xayrli kun", evening: "Xayrli kech",
+       night: "Uxlay olmayapsizmi?", swipe: "← → surish trekni almashtiradi · pastga yopadi", nowFrom: "Hozir ijroda",
+       moods: ["🔥 Xitlar", "🚗 Mashinaga", "😢 G'amgin", "🏋️ Zal uchun", "💃 To'y", "🌙 Chill"]},
+  en: {title: "Your music", q: "Song, artist or vibe…", search: "Search", likes: "Mine", playlists: "Playlists",
+       hint: "Find any song", hint2: "Type a title or an artist, or pick a vibe above", none: "Nothing found 🙈",
+       likesEmpty: "Tap ❤️ under a track in the bot and it shows up here", plEmpty: "Create one with «📂 To playlist» under a track",
+       tracks: "tracks", back: "← All playlists", sent: "The track also arrived in your chat 💾", err: "Didn't work, try again",
+       playAll: "▶ Play all", shuffleAll: "🔀 Shuffle", morning: "Good morning", day: "Good afternoon", evening: "Good evening",
+       night: "Can't sleep?", swipe: "swipe ← → to switch · down to close", nowFrom: "Now playing",
+       moods: ["🔥 Hits", "🚗 Car music", "😢 Sad", "🏋️ Gym", "💃 Wedding", "🌙 Chill"]},
 };
+const YEAR = new Date().getFullYear();
+const MOOD_Q = [`top hits ${YEAR}`, `uzbek music for car bass ${YEAR}`, `грустные песни ${YEAR}`, `workout phonk ${YEAR}`,
+                `uzbek to'y qo'shiqlari ${YEAR}`, "lofi chill hits"];
 let lang = ((tg && tg.initDataUnsafe.user && tg.initDataUnsafe.user.language_code) || "ru").slice(0, 2);
 if (!L[lang]) lang = "ru";
 const S = k => L[lang][k];
-
+function tracksWord(n) {  // 1 трек, 2 трека, 5 треков
+  if (lang !== "ru") return `${n} ${S("tracks")}`;
+  const m10 = n % 10, m100 = n % 100;
+  return `${n} ${m10 === 1 && m100 !== 11 ? "трек" : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "трека" : "треков"}`;
+}
 const $ = id => document.getElementById(id);
 const audio = $("audio");
+
 let me = {likes: [], playlists: []};
-let results = [], queue = [], qi = -1, tab = "search", openPl = null;
+let results = [], queue = [], order = [], pos = -1, tab = "search", openPl = null, shuffle = false, repeat = false, loading = false;
 
-function applyLang() {
-  document.documentElement.lang = lang;
-  $("title").textContent = S("title"); $("q").placeholder = S("q");
-  $("tab-search").textContent = S("search"); $("tab-likes").textContent = S("likes");
-  $("tab-playlists").textContent = S("playlists");
+/* ---------- helpers */
+const fmt = s => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const split = title => { const i = title.indexOf(" - "); return i > 0 ? [title.slice(i + 3), title.slice(0, i)] : [title, ""]; };
+const isYt = id => /^[\w-]{11}$/.test(id);
+function hash(s) { let h = 2166136261; for (const c of s) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
+function palette(title) {
+  const h = hash(title) % 360;
+  return [`hsl(${h} 90% 60%)`, `hsl(${(h + 55) % 360} 85% 52%)`, `hsl(${(h + 180) % 360} 90% 60%)`];
 }
-
+const letterOf = title => esc((split(title)[0].match(/[\p{L}\p{N}]/u) || ["♪"])[0].toUpperCase());
+function art(it, cls = "", big = false) {
+  const [c1, c2] = palette(it.title);
+  const img = isYt(it.id) ? `<img loading="lazy" src="https://i.ytimg.com/vi/${it.id}/${big ? "hqdefault" : "mqdefault"}.jpg" onerror="this.remove()">` : "";
+  return `<div class="cover ${cls}" style="background:linear-gradient(135deg,${c1},${c2})">${letterOf(it.title)}${img}</div>`;
+}
+function tint(title) {
+  const [a, b, c] = palette(title), r = document.documentElement.style;
+  r.setProperty("--a1", a); r.setProperty("--a2", b); r.setProperty("--a3", c);
+}
 async function api(path, opts = {}) {
   const r = await fetch(path, {...opts, headers: {"X-Init-Data": init, "Content-Type": "application/json"}});
   const data = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error(data.error || S("err")); e.api = true; throw e; }
   return data;
 }
-
 function toast(text) {
   const el = $("toast"); el.textContent = text; el.classList.add("show");
   clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("show"), 2600);
 }
 
-const fmt = s => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
-const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
-
-function split(title) {
-  const i = title.indexOf(" - ");
-  return i > 0 ? [title.slice(i + 3), title.slice(0, i)] : [title, ""];
+/* ---------- rendering */
+function applyLang() {
+  document.documentElement.lang = lang;
+  const h = new Date().getHours();
+  const u = tg && tg.initDataUnsafe.user;
+  $("hello").textContent = (h < 5 ? S("night") : h < 12 ? S("morning") : h < 18 ? S("day") : S("evening")) + (u ? ", " + u.first_name : "");
+  $("title").textContent = S("title"); $("q").placeholder = S("q");
+  $("tab-search").textContent = "🔎 " + S("search"); $("tab-likes").textContent = "❤️ " + S("likes");
+  $("tab-playlists").textContent = "📂 " + S("playlists");
+  $("swipehint").textContent = S("swipe"); $("from").textContent = S("nowFrom");
 }
+function movePill() {
+  const btn = document.querySelector(`.tab[data-tab="${tab}"]`), pill = $("pill");
+  pill.style.width = btn.offsetWidth + "px";
+  pill.style.transform = `translateX(${btn.offsetLeft - 4}px)`;
+}
+const current = () => (pos >= 0 ? queue[order[pos]] : null);
 
-function renderTracks(items, empty, list = $("list")) {
-  if (!items.length) { list.innerHTML = `<div class="empty">${esc(empty)}</div>`; return; }
-  const playing = qi >= 0 && queue[qi] ? queue[qi].id : null;
-  list.innerHTML = items.map((it, i) => {
+function rows(items) {
+  const cur = current();
+  return items.map((it, i) => {
     const [name, artist] = split(it.title);
-    const sub = [artist, it.duration ? fmt(it.duration) : ""].filter(Boolean).join(" · ");
-    return `<div class="row ${it.id === playing ? "playing" : ""}" data-i="${i}">
-      <div class="n">${i + 1}</div><div class="t"><b>${esc(name)}</b><span>${esc(sub)}</span></div>
-      <button class="go" data-i="${i}">${it.id === playing && !audio.paused ? "❚❚" : "▶"}</button></div>`;
+    const on = cur && cur.id === it.id;
+    const right = on ? '<div class="eq"><i></i><i></i><i></i></div>' : `<span class="dur">${it.duration ? fmt(it.duration) : ""}</span>`;
+    return `<div class="row ${on ? "playing" : ""}" data-i="${i}" style="animation-delay:${Math.min(i, 12) * 30}ms">
+      ${art(it)}<div class="t"><b>${esc(name)}</b><span>${esc(artist || "♪")}</span></div>${right}</div>`;
   }).join("");
-  list.querySelectorAll(".row").forEach(el => el.onclick = () => playFrom(items, +el.dataset.i));
 }
-
-function renderPlaylists() {
-  const list = $("list");
-  if (openPl) {
-    list.innerHTML = `<button class="back" id="back">${esc(S("back"))}</button><h1>📂 ${esc(openPl.name)}</h1><div id="rows"></div>`;
-    $("back").onclick = () => { openPl = null; render(); };
-    renderTracks(openPl.items, S("none"), $("rows"));
-    return;
-  }
-  if (!me.playlists.length) { list.innerHTML = `<div class="empty">${esc(S("plEmpty"))}</div>`; return; }
-  list.innerHTML = me.playlists.map((p, i) =>
-    `<div class="pl" data-i="${i}"><b>📂 ${esc(p.name)}</b><br><span>${p.items.length} ${esc(S("tracks"))}</span></div>`).join("");
-  list.querySelectorAll(".pl").forEach(el => el.onclick = () => { openPl = me.playlists[+el.dataset.i]; render(); });
+function bindRows(el, items) { el.querySelectorAll(".row").forEach(r => r.onclick = () => { haptic(); playList(items, +r.dataset.i); }); }
+const emptyView = (icon, a, b = "") => `<div class="empty view"><span class="big">${icon}</span><b>${esc(a)}</b><br>${esc(b)}</div>`;
+const heroButtons = () => `<div class="hero"><button class="chip hot" id="playall">${esc(S("playAll"))}</button><button class="chip glass" id="shuf">${esc(S("shuffleAll"))}</button></div>`;
+function bindHero(items) {
+  const a = $("playall"), b = $("shuf");
+  if (a) a.onclick = () => { haptic("medium"); shuffle = false; syncToggles(); playList(items, 0, true); };
+  if (b) b.onclick = () => { haptic("medium"); shuffle = true; syncToggles(); playList(items, Math.floor(Math.random() * items.length), true); };
 }
 
 function render() {
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
+  movePill();
   $("form").style.display = tab === "search" ? "" : "none";
-  if (tab === "search") renderTracks(results, $("q").value.trim().length < 2 ? S("hint") : S("none"));
-  else if (tab === "likes") renderTracks(me.likes, S("likesEmpty"));
-  else renderPlaylists();
+  const list = $("list");
+  if (tab === "search") {
+    const moods = `<div class="moods">${S("moods").map((m, i) => `<button class="chip glass" data-m="${i}">${esc(m)}</button>`).join("")}</div>`;
+    if (loading) list.innerHTML = moods + `<div class="view">${'<div class="skel"></div>'.repeat(6)}</div>`;
+    else if (!results.length) list.innerHTML = moods + emptyView("🎧", $("q").value.trim().length >= 2 ? S("none") : S("hint"), S("hint2"));
+    else { list.innerHTML = moods + `<div class="view">${rows(results)}</div>`; bindRows(list, results); }
+    list.querySelectorAll("[data-m]").forEach(b => b.onclick = () => { haptic(); runSearch(MOOD_Q[+b.dataset.m], b.textContent); });
+  } else if (tab === "likes") {
+    if (!me.likes.length) list.innerHTML = emptyView("💜", S("likesEmpty"));
+    else { list.innerHTML = `<div class="view">${heroButtons()}${rows(me.likes)}</div>`; bindRows(list, me.likes); bindHero(me.likes); }
+  } else if (openPl) {
+    list.innerHTML = `<div class="view"><button class="back" id="back">${esc(S("back"))}</button>
+      <h1 style="margin:8px 0 2px">${esc(openPl.name)}</h1><div class="dur">${tracksWord(openPl.items.length)}</div>
+      ${openPl.items.length ? heroButtons() + rows(openPl.items) : emptyView("📂", S("none"))}</div>`;
+    $("back").onclick = () => { haptic(); openPl = null; render(); };
+    bindRows(list, openPl.items); bindHero(openPl.items);
+  } else if (!me.playlists.length) {
+    list.innerHTML = emptyView("📂", S("plEmpty"));
+  } else {
+    list.innerHTML = `<div class="grid view">${me.playlists.map((p, i) => {
+      const [c1, c2, c3] = palette(p.name);
+      return `<div class="card" data-i="${i}" style="animation-delay:${i * 50}ms">
+        <div class="art" style="background:radial-gradient(circle at 20% 15%,${c3},transparent 55%),linear-gradient(135deg,${c1},${c2})"></div>
+        <b>${esc(p.name)}</b><span>${tracksWord(p.items.length)}</span></div>`;
+    }).join("")}</div>`;
+    list.querySelectorAll(".card").forEach(c => c.onclick = () => { haptic(); openPl = me.playlists[+c.dataset.i]; render(); });
+  }
 }
 
-async function playFrom(items, i) {
-  if (queue === items && qi === i && audio.src) { audio.paused ? audio.play() : audio.pause(); return; }
-  queue = items; qi = i;
-  await playCurrent();
+/* ---------- playback */
+function playList(items, i, fresh = false) {
+  const cur = current();
+  if (!fresh && cur && queue === items && cur.id === items[i].id && audio.src) { toggle(); return; }
+  queue = items;
+  order = items.map((_, k) => k);
+  if (shuffle) { order.splice(i, 1); order.sort(() => Math.random() - .5); order.unshift(i); pos = 0; } else pos = i;
+  playCurrent();
 }
-
-async function playCurrent() {
-  const it = queue[qi]; if (!it) return;
+function toggle() { if (!audio.src) return; haptic(); if (audio.paused) audio.play().catch(() => {}); else audio.pause(); }
+function step(d) {
+  if (!queue.length) return;
+  pos = (pos + d + order.length) % order.length;
+  playCurrent(d > 0 ? "next" : "prev");
+}
+async function playCurrent(dir) {
+  const it = current(); if (!it) return;
   const [name, artist] = split(it.title);
-  $("now").innerHTML = `<span class="spin">⏳</span> ${esc(name)}`;
-  $("player").classList.add("show");
-  if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+  wireViz();
+  tint(it.title);
+  $("mini").classList.add("show");
+  $("mini-title").textContent = name; $("mini-artist").textContent = "⏳ " + (artist || "");
+  $("full-title").textContent = name; $("full-artist").textContent = artist;
+  $("mini-cover").innerHTML = art(it, "spin-art");
+  const [c1, c2] = palette(it.title);
+  $("label").style.background = `linear-gradient(135deg,${c1},${c2})`;
+  $("label").innerHTML = (isYt(it.id) ? `<img src="https://i.ytimg.com/vi/${it.id}/hqdefault.jpg" onerror="this.remove()">` : "");
+  if (dir) {
+    const v = $("vinyl"); v.style.transform = `translateX(${dir === "next" ? -50 : 50}px) scale(.88)`;
+    setTimeout(() => v.style.transform = "", 230);
+  }
+  render();
   try {
     if (!it.url) {
       const r = await api("/api/play", {method: "POST", body: JSON.stringify({id: it.id, title: it.title})});
       it.url = r.url; if (r.sent) toast(S("sent"));
     }
-    if (queue[qi] !== it) return; // the user picked another track meanwhile
-    audio.src = it.url; await audio.play();
-    $("now").textContent = artist ? `${name} — ${artist}` : name;
-    if ("mediaSession" in navigator) navigator.mediaSession.metadata = new MediaMetadata({title: name, artist});
+    if (current() !== it) return;  // another track was picked meanwhile
+    audio.src = it.url;
+    await audio.play();
+    $("mini-artist").textContent = artist;
+    if ("mediaSession" in navigator) navigator.mediaSession.metadata = new MediaMetadata({title: name, artist,
+      artwork: isYt(it.id) ? [{src: `https://i.ytimg.com/vi/${it.id}/hqdefault.jpg`, sizes: "480x360"}] : []});
   } catch (e) {
-    $("now").textContent = name; toast(e.api ? e.message : S("err"));
+    if (current() === it) { $("mini-artist").textContent = artist; toast(e.api ? e.message : S("err")); haptic("heavy"); }
   }
-  render();
 }
+function syncPP() {
+  const icon = audio.paused ? ICON.play : ICON.pause;
+  $("pp").innerHTML = icon; $("mini-pp").innerHTML = icon;
+  document.body.classList.toggle("paused", audio.paused);
+}
+function syncToggles() { $("shuffle").classList.toggle("on", shuffle); $("repeat").classList.toggle("on", repeat); }
 
-function step(d) { if (!queue.length) return; qi = (qi + d + queue.length) % queue.length; playCurrent(); }
-
-audio.addEventListener("play", () => { $("pp").textContent = "❚❚"; render(); });
-audio.addEventListener("pause", () => { $("pp").textContent = "▶"; render(); });
-audio.addEventListener("ended", () => step(1));
+audio.addEventListener("play", () => { syncPP(); render(); });
+audio.addEventListener("pause", syncPP);
+audio.addEventListener("ended", () => { if (repeat) { audio.currentTime = 0; audio.play(); } else step(1); });
 audio.addEventListener("timeupdate", () => {
+  const p = audio.duration ? audio.currentTime / audio.duration * 100 : 0;
   $("cur").textContent = fmt(audio.currentTime); $("dur").textContent = fmt(audio.duration);
-  if (audio.duration) $("seek").value = audio.currentTime / audio.duration * 100;
+  $("fill").style.width = p + "%"; $("knob").style.left = p + "%"; $("mini-prog").style.width = p + "%";
 });
-$("seek").oninput = e => { if (audio.duration) audio.currentTime = e.target.value / 100 * audio.duration; };
-$("pp").onclick = () => audio.src && (audio.paused ? audio.play() : audio.pause());
-$("prev").onclick = () => step(-1);
-$("next").onclick = () => step(1);
+
+/* seek bar: drag with a finger */
+(() => {
+  const bar = $("seek");
+  let drag = false;
+  const move = e => { const r = bar.getBoundingClientRect(); if (audio.duration) audio.currentTime = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * audio.duration; };
+  bar.addEventListener("pointerdown", e => { drag = true; bar.setPointerCapture(e.pointerId); move(e); });
+  bar.addEventListener("pointermove", e => drag && move(e));
+  bar.addEventListener("pointerup", () => { drag = false; haptic(); });
+})();
+
+/* full screen sheet: open from the mini player; swipe sideways to switch, down to close */
+const full = $("full");
+function openFull() { full.classList.add("show"); haptic("medium"); if (tg && tg.BackButton) tg.BackButton.show(); resizeViz(); }
+function closeFull() { full.classList.remove("show"); if (tg && tg.BackButton) tg.BackButton.hide(); }
+$("mini").onclick = e => { if (!e.target.closest("button")) openFull(); };
+$("close").onclick = closeFull;
+if (tg && tg.BackButton) tg.BackButton.onClick(closeFull);
+(() => {
+  let x0 = 0, y0 = 0, active = false;
+  full.addEventListener("touchstart", e => {
+    if (e.target.closest("#seek, .controls")) return;
+    active = true; x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+  }, {passive: true});
+  full.addEventListener("touchmove", e => {
+    if (!active) return;
+    const dx = e.touches[0].clientX - x0, dy = e.touches[0].clientY - y0;
+    if (dy > 0 && Math.abs(dy) > Math.abs(dx)) { full.style.transition = "none"; full.style.transform = `translateY(${dy}px)`; }
+    else $("vinyl").style.transform = `translateX(${dx * .6}px) rotate(${dx * .12}deg)`;
+  }, {passive: true});
+  full.addEventListener("touchend", e => {
+    if (!active) return; active = false;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+    full.style.transition = ""; full.style.transform = ""; $("vinyl").style.transform = "";
+    if (dy > 110 && Math.abs(dy) > Math.abs(dx)) closeFull();
+    else if (Math.abs(dx) > 70) { haptic("medium"); step(dx < 0 ? 1 : -1); }
+  });
+})();
+
+/* visualizer ring: the real spectrum when Web Audio runs, soft animated bars otherwise.
+   Audio is routed through Web Audio only once the context is really running, so it can never go silent. */
+let actx = null, analyser = null, freq = null;
+document.addEventListener("pointerdown", () => {
+  try {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === "suspended") actx.resume();
+  } catch (e) { actx = null; }
+}, {capture: true});
+function wireViz() {
+  if (analyser || !actx || actx.state !== "running") return;
+  try {
+    const src = actx.createMediaElementSource(audio);
+    analyser = actx.createAnalyser(); analyser.fftSize = 128; analyser.smoothingTimeConstant = .8;
+    src.connect(analyser); analyser.connect(actx.destination);
+    freq = new Uint8Array(analyser.frequencyBinCount);
+  } catch (e) { analyser = null; }
+}
+const cv = $("viz"), cx = cv.getContext("2d");
+function resizeViz() { const r = cv.getBoundingClientRect(); cv.width = r.width * devicePixelRatio; cv.height = r.height * devicePixelRatio; }
+addEventListener("resize", () => { resizeViz(); movePill(); });
+function drawViz(t) {
+  requestAnimationFrame(drawViz);
+  if (!full.classList.contains("show")) return;
+  const w = cv.width, h = cv.height, d = devicePixelRatio; cx.clearRect(0, 0, w, h);
+  const v = $("vinyl").getBoundingClientRect(), s = cv.getBoundingClientRect();
+  const x = (v.left + v.width / 2 - s.left) * d, y = (v.top + v.height / 2 - s.top) * d, r0 = (v.width / 2 + 10) * d;
+  const live = analyser && !audio.paused;
+  if (live) analyser.getByteFrequencyData(freq);
+  const cs = getComputedStyle(document.documentElement), g = cx.createLinearGradient(0, 0, w, h);
+  g.addColorStop(0, cs.getPropertyValue("--a1")); g.addColorStop(.5, cs.getPropertyValue("--a2")); g.addColorStop(1, cs.getPropertyValue("--a3"));
+  cx.strokeStyle = g; cx.lineCap = "round"; cx.lineWidth = 4 * d;
+  const n = 72;
+  for (let i = 0; i < n; i++) {
+    const k = i < n / 2 ? i : n - i;  // mirrored, so the ring is symmetric
+    let m = live ? freq[Math.floor(k / (n / 2) * freq.length * .7)] / 255 : 0;
+    if (!live || !m) m = audio.paused ? .06 : .28 + .22 * Math.sin(t / 240 + k * .55) * Math.sin(t / 390 + k * .21);
+    const a = i / n * Math.PI * 2 - Math.PI / 2, len = (6 + m * 44) * d;
+    cx.globalAlpha = .35 + m * .65;
+    cx.beginPath();
+    cx.moveTo(x + Math.cos(a) * r0, y + Math.sin(a) * r0);
+    cx.lineTo(x + Math.cos(a) * (r0 + len), y + Math.sin(a) * (r0 + len));
+    cx.stroke();
+  }
+  cx.globalAlpha = 1;
+}
+requestAnimationFrame(drawViz);
+
+/* controls */
+$("pp").onclick = toggle; $("mini-pp").onclick = toggle;
+$("next").onclick = () => { haptic(); step(1); }; $("mini-next").onclick = () => { haptic(); step(1); };
+$("prev").onclick = () => { haptic(); if (audio.currentTime > 4) audio.currentTime = 0; else step(-1); };
+$("shuffle").onclick = () => { shuffle = !shuffle; haptic(); syncToggles(); };
+$("repeat").onclick = () => { repeat = !repeat; haptic(); syncToggles(); };
 if ("mediaSession" in navigator) {
   navigator.mediaSession.setActionHandler("previoustrack", () => step(-1));
   navigator.mediaSession.setActionHandler("nexttrack", () => step(1));
 }
-
-document.querySelectorAll(".tab").forEach(b => b.onclick = () => { tab = b.dataset.tab; openPl = null; render(); });
+document.querySelectorAll(".tab").forEach(b => b.onclick = () => { haptic(); tab = b.dataset.tab; openPl = null; render(); });
 
 let searchSeq = 0;
-$("form").onsubmit = async e => {
-  e.preventDefault();
-  const q = $("q").value.trim(); if (q.length < 2) return;
+async function runSearch(q, label) {
+  if (q.length < 2) return;
+  if (label) $("q").value = label.replace(/^\S+\s/, "");
   $("q").blur();
-  const seq = ++searchSeq;
-  $("list").innerHTML = `<div class="empty"><span class="spin">⏳</span> ${esc(S("loading"))}</div>`;
+  const seq = ++searchSeq; loading = true; render();
   try { const r = await api("/api/search?q=" + encodeURIComponent(q)); if (seq === searchSeq) results = r.items; }
-  catch (err) { toast(err.message); results = []; }
-  if (seq === searchSeq) render();
-};
+  catch (err) { if (seq === searchSeq) { toast(err.message); results = []; } }
+  if (seq === searchSeq) { loading = false; render(); if (results.length) haptic("ok"); }
+}
+$("form").onsubmit = e => { e.preventDefault(); runSearch($("q").value.trim()); };
 
+/* start */
+$("pp").innerHTML = $("mini-pp").innerHTML = ICON.play;
+$("next").innerHTML = $("mini-next").innerHTML = ICON.next; $("prev").innerHTML = ICON.prev;
+$("close").innerHTML = ICON.down; $("shuffle").innerHTML = ICON.shuffle; $("repeat").innerHTML = ICON.repeat;
 (async () => {
   applyLang(); render();
   try {
     me = await api("/api/me");
     if (me.lang && L[me.lang]) { lang = me.lang; applyLang(); }
     const start = tg && tg.initDataUnsafe.start_param;
-    if (start && start.startsWith("pl_")) {
-      const pl = await api("/api/playlist/" + encodeURIComponent(start.slice(3)));
-      tab = "playlists"; openPl = pl;
-    } else if (me.likes.length) { tab = "likes"; }
+    if (start && start.startsWith("pl_")) { openPl = await api("/api/playlist/" + encodeURIComponent(start.slice(3))); tab = "playlists"; }
+    else if (me.likes.length) tab = "likes";
   } catch (e) { toast(e.message); }
   render();
 })();
