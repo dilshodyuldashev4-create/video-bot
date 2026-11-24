@@ -167,7 +167,7 @@ def _quick_tunnel_url() -> str:
     try:
         data = json.loads(http_get(config.tunnel_metrics.rstrip("/") + "/quicktunnel", timeout=5))
     except Exception as e:  # noqa: BLE001
-        log.info("quick tunnel not ready: %s", str(e)[:120])
+        log.warning("Mini App: cloudflared tunnel not ready: %s", str(e)[:120])
         return ""
     host = (data or {}).get("hostname") or ""
     return f"https://{host}" if host else ""
@@ -209,6 +209,7 @@ async def run(bot: Bot, db: DB) -> None:
                 cleanup_old(stream_dir, max_age=STREAM_TTL)
             except Exception:
                 log.exception("Mini App refresh failed")
-            await asyncio.sleep(60 if not _state["url"] else 300)
+            # the tunnel needs ~10-30 s after start: look often until it is up, then every 5 minutes
+            await asyncio.sleep(10 if not _state["url"] else 300)
     finally:
         await runner.cleanup()

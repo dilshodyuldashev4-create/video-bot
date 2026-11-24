@@ -432,9 +432,9 @@ async def cb_story(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
 async def cmd_app(message: Message, lang: str) -> None:
     from aiogram.types import WebAppInfo
 
-    from ..webapp.server import public_url
+    from ..webapp.server import public_url, refresh_url
 
-    url = public_url()
+    url = public_url() or await refresh_url(message.bot)  # not found yet: ask the tunnel right now
     if not url or message.chat.type != "private":
         await message.answer(t(lang, "app_off"))
         return
