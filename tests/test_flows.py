@@ -1,6 +1,8 @@
 """End-to-end handler flows with a fake Telegram API (no network)."""
 import datetime
 import shutil
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -523,4 +525,55 @@ async def test_shazam_always_tries_other_sources(env, monkeypatch, http_base, me
     assert session.of(SendAudio), "MP3 must be sent"
     card = session.of(SendMessage)[-1]
     assert card.reply_markup is None  # no "Open in Shazam" button
+    assert not any("не удалось" in (m.text or "") for m in session.of(SendMessage))
+
+
+async def test_youtube_blocked_mp3_comes_from_catalogue_site(env, monkeypatch, media_dir, data_dir):
+    """Live bug: YouTube says "Sign in to confirm you're not a bot" on every route ->
+    the MP3 must come from an MP3 catalogue site, without hammering YouTube."""
+    from bot.services import mp3sites
+
+    session, _, _, _, send_media = env
+    mp3 = media_dir / "song.mp3"
+    if not mp3.exists():
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=330:duration=40",
+                        "-b:a", "128k", str(mp3)], check=True)
+
+    async def fake_fetch(bot, file_id, size):
+        d = data_dir / "in4"
+        d.mkdir(exist_ok=True)
+        shutil.copy(media_dir / "clip.mp4", d / "input")
+        return d / "input"
+
+    yt_downloads, site_queries = [], []
+
+    async def blocked_download(video_id, url=None):
+        yt_downloads.append(video_id)
+        monkeypatch.setattr(downloader, "_yt_blocked_until", time.time() + 900)
+        raise downloader.DownloadFailed("Sign in to confirm you're not a bot")
+
+    async def fake_search(q, limit=30):
+        return [downloader.Track(id="a", title="UzBoom - Kecholmadim")]
+
+    def site_search(q):
+        site_queries.append(q)
+        return [mp3sites.SiteTrack("Other", "Boshqa qo'shiq", "http://x/1.mp3"),
+                mp3sites.SiteTrack("UzBoom", "Kecholmadim", "http://x/2.mp3")], "http://x"
+
+    def site_download(tr, referer, workdir):
+        assert tr.url == "http://x/2.mp3"
+        shutil.copy(mp3, workdir / "song.mp3")
+        return workdir / "song.mp3", None
+
+    monkeypatch.setattr(rec_handler, "_fetch", fake_fetch)
+    monkeypatch.setattr(recognizer, "recognize", lambda p: _async(recognizer.Song("Kecholmadim", "UzBoom")))
+    monkeypatch.setattr(downloader, "search", fake_search)
+    monkeypatch.setattr(downloader, "download_audio", blocked_download)
+    monkeypatch.setattr(mp3sites, "search_sync", site_search)
+    monkeypatch.setattr(mp3sites, "download_sync", site_download)
+    await send_media(voice=__import__("aiogram").types.Voice(file_id="v", file_unique_id="u", duration=10))
+    audio = session.of(SendAudio)
+    assert audio, "MP3 must be sent"
+    assert audio[-1].performer == "UzBoom" and audio[-1].title == "Kecholmadim"
+    assert len(yt_downloads) <= 1  # YouTube is not retried 5 times once it is known to be blocked
     assert not any("не удалось" in (m.text or "") for m in session.of(SendMessage))

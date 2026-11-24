@@ -96,3 +96,31 @@ def test_three_languages_have_the_same_keys():
 def test_guess_lang_three():
     assert guess_lang("uz") == "uz" and guess_lang("en-GB") == "en" and guess_lang("ru") == "ru"
     assert guess_lang("de") == "ru"
+
+
+def test_mp3site_parser_and_pick():
+    from bot.services import mp3sites
+
+    page = '''
+    <ul class="tracks__list">
+    <li class="tracks__item track mustoggler" itemprop="track"
+        data-musmeta='{"artist":"UzBoom","title":"Kecholmadim","url":"https:\\/\\/s.example\\/get\\/music\\/1.mp3","img":"\\/img\\/1.jpg"}'>
+      <div class="track__title">Kecholmadim</div>
+    </li>
+    <li class="tracks__item track mustoggler">
+      <div class="track__info"><a href="/song/2"><div class="track__title"> Kecholmadim (Remix) </div>
+      <div class="track__desc">DJ &amp; UzBoom</div></a></div>
+      <div class="track__fulltime">03:21</div>
+      <a href="/get/music/2.mp3" class="track__download-btn" download>dl</a>
+    </li>
+    <li class="tracks__item track"><div class="track__title">Boshqa</div>
+      <div class="track__desc">Other</div><a class="track__download-btn" href="https://s.example/3.mp3">x</a></li>
+    </ul>'''
+    tracks = mp3sites.parse_search(page, "https://rus.hitmotop.com")
+    assert [(t.artist, t.title) for t in tracks] == [
+        ("UzBoom", "Kecholmadim"), ("DJ & UzBoom", "Kecholmadim (Remix)"), ("Other", "Boshqa")]
+    assert tracks[0].url == "https://s.example/get/music/1.mp3"
+    assert tracks[0].cover == "https://rus.hitmotop.com/img/1.jpg"
+    assert tracks[1].url == "https://rus.hitmotop.com/get/music/2.mp3" and tracks[1].duration == 201
+    picked = mp3sites.pick(tracks, "Kecholmadim", "UzBoom")
+    assert [t.title for t in picked] == ["Kecholmadim", "Kecholmadim (Remix)"]  # unrelated dropped, remix last

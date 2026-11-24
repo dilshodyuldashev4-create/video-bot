@@ -19,7 +19,7 @@ from aiogram.enums import ButtonStyle
 
 from ..config import config
 from ..db import DB
-from ..services import downloader
+from ..services import downloader, mp3sites
 from ..texts import LANGS, LINE
 from ..utils import esc
 
@@ -288,6 +288,16 @@ async def diag_text() -> str:
         return f"<b>{name}</b>\n  direct: {fmt(direct)}\n  via proxy: {fmt(proxied)}"
 
     lines += await asyncio.gather(*(check(n, u) for n, u in DIAG_TARGETS))
+
+    def sites() -> str:
+        try:
+            found, base = mp3sites.search_sync("Uzboom")
+            return f"✅ {esc(base)} ({len(found)} треков)" if found else f"⚠️ {esc(base)}: 0 треков"
+        except Exception as e:  # noqa: BLE001
+            return f"❌ {esc(str(e)[:150])}"
+    lines.append(f"<b>MP3-каталог</b>: {await asyncio.to_thread(sites)}")
+    if downloader.youtube_blocked():
+        lines.append("⚠️ YouTube сейчас блокирует сервер: MP3 берутся из других источников")
     return "\n".join(lines)
 
 
