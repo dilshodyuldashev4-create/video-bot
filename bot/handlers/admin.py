@@ -326,6 +326,17 @@ async def diag_text() -> str:
         except Exception as e:  # noqa: BLE001
             return f"❌ {esc(str(e)[:150])}"
     lines.append(f"<b>TikTok через tikwm</b>: {await asyncio.to_thread(tt)}")
+
+    def dz() -> str:
+        from ..services import deezer
+        try:
+            artist = deezer.find_artist("Pop Smoke")
+            return "✅" if artist else "⚠️ empty"
+        except Exception as e:  # noqa: BLE001
+            return f"❌ {esc(str(e)[:150])}"
+    lines.append(f"<b>Deezer (похожие, релизы)</b>: {await asyncio.to_thread(dz)}")
+    from ..webapp.server import public_url
+    lines.append(f"<b>Плеер (Mini App)</b>: {esc(public_url()) if public_url() else '⏳ ждёт туннель cloudflared'}")
     if downloader.youtube_blocked():
         lines.append("⚠️ YouTube сейчас блокирует сервер: MP3 берутся из других источников")
     return "\n".join(lines)
