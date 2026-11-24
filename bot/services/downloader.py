@@ -12,7 +12,7 @@ from pathlib import Path
 import yt_dlp
 
 from ..config import config
-from . import media, mp3sites, tiktok, ytalt
+from . import cobalt, media, mp3sites, tiktok, ytalt
 
 log = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ def _routes(url: str) -> list[dict]:
 
 _BOT_CHECK = ("not a bot", "sign in to confirm", "confirm you're not", "confirm you’re not")
 # Other YouTube player clients sometimes pass when the default one gets the bot check.
-_YT_FALLBACK_CLIENTS = (["tv_simply"], ["mweb"], ["web_safari"])
+_YT_FALLBACK_CLIENTS = (["tv_simply"], ["web_embedded"], ["mweb"], ["web_safari"])
 # When every route/client got the bot check, YouTube downloads are skipped for a while
 # and songs come from the other sources straight away (no 10 s of pointless retries).
 YT_BLOCK_PAUSE = 15 * 60
@@ -423,25 +423,65 @@ def _alt_worth_trying(err: str) -> bool:
 
 
 async def download_audio(video_id: str, url: str | None = None) -> AudioFile:
-    """MP3 of a YouTube video. If YouTube blocks the server, it comes through Invidious/Piped."""
+    """MP3 of a video. YouTube: yt-dlp, then cobalt, then Invidious/Piped (the server IP is
+    often blocked). TikTok: yt-dlp, then tikwm. While YouTube is known to block us,
+    the helpers go first."""
     youtube = url is None or _site(url) == "youtube"
     url = url or f"https://www.youtube.com/watch?v={video_id}"
-    if youtube and youtube_blocked() and ytalt.available():
+    if not youtube:
         try:
-            return await _alt_audio(video_id)
-        except DownloadFailed:
-            pass  # instances failed; yt-dlp might work again by now
-    try:
-        return await _fetch_audio(url)
-    except DownloadFailed as e:
-        if _site(url) == "tiktok" and _alt_worth_trying(str(e)):
-            return await _tiktok_audio(url, e)
-        if not (youtube and ytalt.available() and _alt_worth_trying(str(e))):
+            return await _fetch_audio(url)
+        except DownloadFailed as e:
+            if _site(url) == "tiktok" and _alt_worth_trying(str(e)):
+                return await _tiktok_audio(url, e)
             raise
+    return await _youtube_chain(
+        lambda: _fetch_audio(url),
+        [(cobalt.available, lambda: _cobalt_audio(url)), (ytalt.available, lambda: _alt_audio(video_id))],
+    )
+
+
+async def _youtube_chain(ytdlp, helpers):
+    """yt-dlp first (unless YouTube is blocking us right now), then each helper."""
+    errors: list[str] = []
+    blocked = youtube_blocked()
+    if not blocked:
         try:
-            return await _alt_audio(video_id)
-        except DownloadFailed as alt:
-            raise DownloadFailed(f"{e}; alt: {alt}") from e
+            return await ytdlp()
+        except DownloadFailed as e:
+            if not _alt_worth_trying(str(e)):
+                raise
+            errors.append(str(e)[:200])
+    for available, run in helpers:
+        if not available():
+            continue
+        try:
+            return await run()
+        except DownloadFailed as e:
+            errors.append(str(e)[:200])
+    if blocked:  # every helper failed: maybe YouTube lets us through again
+        try:
+            return await ytdlp()
+        except DownloadFailed as e:
+            errors.append(str(e)[:200])
+    raise DownloadFailed("; ".join(errors) or "nothing worked")
+
+
+async def _cobalt_audio(url: str) -> AudioFile:
+    workdir = _new_workdir()
+    try:
+        files = await _in_thread(cobalt.fetch, url, True)
+    except Exception as e:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise DownloadFailed(f"cobalt: {e}") from e
+    data, name = files[0]
+    path = workdir / "audio.mp3"
+    path.write_bytes(data)
+    stem = re.sub(r"\s*\(\d+\s*kbps\)|\.mp3$|\.\w{3,4}$", "", name or "", flags=re.I).strip()
+    performer, title = split_title({"title": stem.replace("_", " ")})
+    info = await media.probe(path)
+    return AudioFile(path=path, title=title or stem or "YouTube", performer=performer,
+                     duration=int(info.get("duration") or 0))
 
 
 async def _tiktok_audio(url: str, first: Exception) -> AudioFile:
@@ -581,14 +621,15 @@ _YT_ID = re.compile(r"(?:v=|youtu\.be/|shorts/|embed/|live/)([\w-]{11})")
 
 
 async def download_video(url: str, platform: str) -> VideoResult:
-    """Video in the best quality that fits Telegram. YouTube falls back to Invidious/Piped
-    when the server is blocked."""
+    """Video in the best quality that fits Telegram. YouTube falls back to cobalt and
+    Invidious/Piped when the server is blocked, TikTok to tikwm."""
     m = _YT_ID.search(url) if platform == "youtube" else None
-    if m and youtube_blocked() and ytalt.available():
-        try:
-            return await _alt_video(m.group(1))
-        except DownloadFailed:
-            pass
+    if m:
+        vid = m.group(1)
+        return await _youtube_chain(
+            lambda: _download_video_ytdlp(url, platform),
+            [(cobalt.available, lambda: _cobalt_video(url, vid)), (ytalt.available, lambda: _alt_video(vid))],
+        )
     try:
         return await _download_video_ytdlp(url, platform)
     except DownloadFailed as e:
@@ -597,12 +638,28 @@ async def download_video(url: str, platform: str) -> VideoResult:
                 return await _tiktok_video(url)
             except DownloadFailed as alt:
                 raise DownloadFailed(f"{e}; tikwm: {alt}") from e
-        if not (m and ytalt.available() and _alt_worth_trying(str(e))):
-            raise
+        raise
+
+
+async def _cobalt_video(url: str, video_id: str) -> VideoResult:
+    heights = [h for h in HEIGHTS if h <= config.max_height] or [config.max_height]
+    last: Exception | None = None
+    for height in heights:
+        workdir = _new_workdir()
         try:
-            return await _alt_video(m.group(1))
-        except DownloadFailed as alt:
-            raise DownloadFailed(f"{e}; alt: {alt}") from e
+            files = await _in_thread(cobalt.fetch, url, False, height)
+        except Exception as e:
+            shutil.rmtree(workdir, ignore_errors=True)
+            raise DownloadFailed(f"cobalt: {e}") from e
+        data, _ = files[0]
+        if len(data) > config.upload_limit:
+            shutil.rmtree(workdir, ignore_errors=True)
+            last = TooBig()
+            continue
+        path = workdir / f"{video_id}.mp4"
+        path.write_bytes(data)
+        return VideoResult(files=[path], key=f"youtube:{video_id}", workdir=workdir)
+    raise last or DownloadFailed("cobalt: nothing")
 
 
 async def _tiktok_video(url: str) -> VideoResult:

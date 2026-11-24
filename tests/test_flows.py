@@ -717,3 +717,37 @@ async def test_tiktok_falls_back_to_tikwm(env, monkeypatch, media_dir):
     await press(_choice_buttons(session)[1])
     audio = session.of(SendAudio)[-1]
     assert (audio.performer, audio.title) == ("Pop Smoke", "Dior")
+
+
+async def test_youtube_blocked_video_and_audio_via_cobalt(env, monkeypatch, media_dir):
+    """The user won't set up cookies: blocked YouTube must work through cobalt with zero setup."""
+    from bot.services import cobalt
+
+    session, _, send_text, press, _ = env
+
+    def blocked(url, opts, download=True):
+        raise downloader.yt_dlp.utils.DownloadError("ERROR: [youtube] Uk9u4ikJY0U: Sign in to confirm you're not a bot")
+
+    mp3 = media_dir / "cobalt.mp3"
+    if not mp3.exists():
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=500:duration=20",
+                        "-b:a", "128k", str(mp3)], check=True)
+    asked = []
+
+    def fake_fetch(url, audio, max_height=1080):
+        asked.append(("audio" if audio else "video", url))
+        if audio:
+            return [(mp3.read_bytes(), "UzBoom - Kecholmadim (320kbps).mp3")]
+        return [((media_dir / "clip.mp4").read_bytes(), "video.mp4")]
+
+    monkeypatch.setattr(downloader, "_extract", blocked)
+    monkeypatch.setattr(cobalt, "fetch", fake_fetch)
+    await send_text("https://youtu.be/Uk9u4ikJY0U?si=abc")
+    video_btn, audio_btn, _ = _choice_buttons(session)
+    await press(video_btn)
+    assert session.of(SendVideo), "video must be sent"
+    await press(audio_btn)
+    audio = session.of(SendAudio)[-1]
+    assert (audio.performer, audio.title) == ("UzBoom", "Kecholmadim")
+    assert [k for k, _ in asked] == ["video", "audio"]
+    assert not any("Не получилось" in (m.text or "") for m in session.of(SendMessage))

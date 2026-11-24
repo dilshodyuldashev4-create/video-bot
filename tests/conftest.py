@@ -57,4 +57,8 @@ def no_mp3_sites(monkeypatch):
 
     monkeypatch.setattr(ytalt, "instances", lambda: [])
     monkeypatch.setattr(ytalt, "_down_until", 0.0)
+    from bot.services import cobalt
+
+    monkeypatch.setattr(cobalt, "instances", lambda: [])
+    monkeypatch.setattr(cobalt, "_down_until", 0.0)
     monkeypatch.setattr(downloader, "_yt_blocked_until", 0.0)

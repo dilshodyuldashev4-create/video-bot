@@ -54,7 +54,8 @@ YouTube, Instagram и TikTok часто блокируют IP дата-цент�
 - **Cloudflare WARP** (`warp`): если прямой запрос заблокирован, бот повторяет его через WARP и следующий час ходит на этот сайт сразу через него.
 - **PO-токены для YouTube** (`pot-provider`): yt-dlp сам получает токены, которые YouTube требует от серверов.
 - **Другие клиенты YouTube**: при «not a bot» yt-dlp пробует клиенты tv_simply, mweb, web_safari.
-- **Invidious / Piped**: если YouTube всё равно блокирует сервер, видео и аудио скачиваются через публичные серверы Invidious/Piped (список берётся автоматически; свои можно указать в `YT_ALT_INSTANCES`, например `https://inv.example.com,piped:https://pipedapi.example.com`).
+- **cobalt**: если YouTube блокирует сервер, видео и MP3 скачиваются через публичные серверы cobalt без регистрации (список с instances.cobalt.best; свои можно указать в `COBALT_INSTANCES`).
+- **Invidious / Piped**: если и cobalt не помог, видео и аудио скачиваются через публичные серверы Invidious/Piped (список берётся автоматически; свои можно указать в `YT_ALT_INSTANCES`, например `https://inv.example.com,piped:https://pipedapi.example.com`).
 - **MP3-каталог (hitmotop)** и **SoundCloud** как запасные источники MP3 (зеркало каталога можно задать в `HITMO_URL`).
 
 Команда **`/diag`** в Telegram показывает, что работает с сервера: YouTube, SoundCloud, TikTok напрямую и через прокси, MP3-каталог и Invidious/Piped (если задан `ADMIN_IDS`, команда доступна только админам).
