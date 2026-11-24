@@ -19,7 +19,7 @@ from aiogram.enums import ButtonStyle
 
 from ..config import config
 from ..db import DB
-from ..services import downloader, mp3sites
+from ..services import downloader, mp3sites, ytalt
 from ..texts import LANGS, LINE
 from ..utils import esc
 
@@ -296,6 +296,14 @@ async def diag_text() -> str:
         except Exception as e:  # noqa: BLE001
             return f"❌ {esc(str(e)[:150])}"
     lines.append(f"<b>MP3-каталог</b>: {await asyncio.to_thread(sites)}")
+
+    def alt() -> str:
+        try:
+            info = ytalt.fetch_info("jNQXAC9IVRw")
+            return f"✅ {esc(info.source)}"
+        except Exception as e:  # noqa: BLE001
+            return f"❌ {esc(str(e)[:150])}"
+    lines.append(f"<b>YouTube через Invidious/Piped</b>: {await asyncio.to_thread(alt)}")
     if downloader.youtube_blocked():
         lines.append("⚠️ YouTube сейчас блокирует сервер: MP3 берутся из других источников")
     return "\n".join(lines)

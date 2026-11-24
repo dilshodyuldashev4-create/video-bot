@@ -1,17 +1,18 @@
-"""YouTube / Instagram / TikTok link -> video in good quality + "download the song" button."""
+"""YouTube / Instagram / TikTok link -> choice: 🎬 video in good quality, 🎵 audio MP3,
+🔍 find the music (Shazam; handled in recognize.py)."""
 import logging
 import shutil
 import uuid
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import FSInputFile, Message
+from aiogram.types import CallbackQuery, FSInputFile, Message
 from aiogram.utils.media_group import MediaGroupBuilder
 
-from ..common import bot_username, react, user_lock
+from ..common import _send_cached as send_cached_audio, _send_fresh, bot_username, react, send_track, user_lock
 from ..config import config
 from ..db import DB
-from ..keyboards import video_kb
+from ..keyboards import link_kb, video_kb
 from ..services import downloader, media
 from ..texts import PLATFORM_ICONS, t
 from ..utils import URL_RE, canonical_key, detect_platform, extract_url
@@ -56,40 +57,72 @@ def video_caption(lang: str, username: str, platform: str) -> str:
 
 @router.message(F.text.regexp(URL_RE) | F.caption.regexp(URL_RE))
 async def on_link(message: Message, bot: Bot, db: DB, lang: str) -> None:
+    """A link: ask what to download (video / audio / find the music)."""
     url = extract_url(message.text or message.caption)
     platform = detect_platform(url) if url else None
-    private = message.chat.type == "private"
     if not platform:
-        if private:
+        if message.chat.type == "private":
             await message.reply(t(lang, "unsupported_link"))
         return
+    token = uuid.uuid4().hex[:16]
+    await db.put_file(f"lnk:{token}", "link", url, {"platform": platform})
+    icon, name = PLATFORM_ICONS.get(platform, ("📥", platform.capitalize()))
+    await message.reply(t(lang, "link_choice", icon=icon, platform=name), reply_markup=link_kb(token, lang),
+                        disable_web_page_preview=True)
 
-    async with user_lock(message.from_user.id if message.from_user else message.chat.id) as ok:
+
+async def link_of(db: DB, token: str) -> tuple[str, str] | None:
+    row = await db.get_file(f"lnk:{token}")
+    return (row[1], row[2].get("platform") or detect_platform(row[1]) or "") if row else None
+
+
+@router.callback_query(F.data.startswith("dl:v:") | F.data.startswith("dl:a:"))
+async def cb_link(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
+    _, mode, token = call.data.split(":", 2)
+    link = await link_of(db, token)
+    if not link:
+        await call.answer(t(lang, "link_expired"), show_alert=True)
+        return
+    url, platform = link
+    message = call.message
+    async with user_lock(call.from_user.id) as ok:
         if not ok:
-            if private:
-                await message.reply(t(lang, "busy"))
+            await call.answer(t(lang, "busy"))
             return
+        await call.answer("🎬" if mode == "v" else "🎵")
         username = await bot_username(bot)
-        await react(message, "👀")
-        status = await message.reply(t(lang, "downloading"))
-        done = False
+        status = await message.answer(t(lang, "downloading"))
         try:
-            await _handle(message, bot, db, lang, username, url, platform)
-            done = True
+            if mode == "v":
+                await _handle(message, bot, db, lang, username, url, platform)
+            else:
+                await send_link_audio(bot, db, message.chat.id, lang, url, platform)
         except downloader.TooBig:
-            await message.reply(t(lang, "too_big"))
+            await message.answer(t(lang, "too_big"))
         except downloader.DownloadFailed:
-            log.warning("download failed: %s", url, exc_info=True)
-            await message.reply(t(lang, "dl_failed"))
+            log.warning("download failed (%s): %s", mode, url, exc_info=True)
+            await message.answer(t(lang, "dl_failed"))
         except Exception:
             log.exception("link handler failed: %s", url)
-            await message.reply(t(lang, "error"))
+            await message.answer(t(lang, "error"))
         finally:
-            await react(message, "🔥" if done else "😢")
             try:
                 await status.delete()
             except TelegramBadRequest:
                 pass
+
+
+async def send_link_audio(bot: Bot, db: DB, chat_id: int, lang: str, url: str, platform: str) -> Message:
+    """🎵 Audio of the linked video as MP3 (cached by link)."""
+    key = canonical_key(url, platform)
+    if key.startswith("youtube:"):
+        return await send_track(bot, db, chat_id, key.split(":", 1)[1], lang)
+    username = await bot_username(bot)
+    akey = "la:" + key
+    if msg := await send_cached_audio(bot, db, akey, chat_id, lang, username, None, None):
+        return msg
+    audio = await downloader.download_audio(key, url=url)
+    return await _send_fresh(bot, db, akey, chat_id, lang, username, audio, None, None)
 
 
 async def _handle(message: Message, bot: Bot, db: DB, lang: str, username: str, url: str, platform: str) -> None:

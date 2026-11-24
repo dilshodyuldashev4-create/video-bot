@@ -43,14 +43,14 @@ class SiteTrack:
     duration: int = 0
 
 
-def _ydl(proxy: str | None) -> yt_dlp.YoutubeDL:
-    opts = {"quiet": True, "no_warnings": True, "socket_timeout": 20}
+def _ydl(proxy: str | None, timeout: int = 20) -> yt_dlp.YoutubeDL:
+    opts = {"quiet": True, "no_warnings": True, "socket_timeout": timeout}
     if proxy:
         opts["proxy"] = proxy
     return yt_dlp.YoutubeDL(opts)
 
 
-def _get(url: str, referer: str = "") -> bytes:
+def http_get(url: str, referer: str = "", timeout: int = 20) -> bytes:
     """GET with direct -> proxy fallback. Raises the last error."""
     headers = {"User-Agent": _UA, "Accept-Language": "ru,en;q=0.8"}
     if referer:
@@ -58,7 +58,7 @@ def _get(url: str, referer: str = "") -> bytes:
     last: Exception | None = None
     for proxy in [None, config.proxy] if config.proxy else [None]:
         try:
-            with _ydl(proxy) as ydl:
+            with _ydl(proxy, timeout) as ydl:
                 with ydl.urlopen(Request(url, headers=headers)) as r:
                     return r.read()
         except Exception as e:  # noqa: BLE001
@@ -126,7 +126,7 @@ def search_sync(query: str) -> tuple[list[SiteTrack], str]:
     last: Exception | None = None
     for base in MIRRORS:
         try:
-            page = _get(f"{base}/search?q={urllib.parse.quote_plus(query)}", referer=base + "/")
+            page = http_get(f"{base}/search?q={urllib.parse.quote_plus(query)}", referer=base + "/")
         except Exception as e:  # noqa: BLE001
             last = e
             continue
@@ -160,7 +160,7 @@ def pick(tracks: list[SiteTrack], title: str, artist: str) -> list[SiteTrack]:
 
 
 def download_sync(track: SiteTrack, referer: str, workdir: Path) -> tuple[Path, Path | None]:
-    data = _get(track.url, referer=referer)
+    data = http_get(track.url, referer=referer)
     if len(data) < MIN_BYTES or not (data[:3] == b"ID3" or data[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")):
         raise RuntimeError(f"not an mp3 ({len(data)} bytes)")
     path = workdir / "song.mp3"
@@ -168,7 +168,7 @@ def download_sync(track: SiteTrack, referer: str, workdir: Path) -> tuple[Path, 
     cover = None
     if track.cover:
         try:
-            img = _get(track.cover, referer=referer)
+            img = http_get(track.cover, referer=referer)
             if len(img) > 1000:
                 cover = workdir / "cover.jpg"
                 cover.write_bytes(img)

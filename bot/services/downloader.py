@@ -12,7 +12,7 @@ from pathlib import Path
 import yt_dlp
 
 from ..config import config
-from . import media, mp3sites
+from . import media, mp3sites, ytalt
 
 log = logging.getLogger(__name__)
 
@@ -307,7 +307,7 @@ async def download_song(title: str, artist: str = "", prefer_id: str | None = No
             errors.append(f"yt:{video_id}: {str(e)[:120]}")
             return None
 
-    if prefer_id and not youtube_blocked() and (audio := await attempt(prefer_id)):
+    if prefer_id and (audio := await attempt(prefer_id)):
         return audio
 
     queries = list(dict.fromkeys(q for q in (
@@ -408,9 +408,43 @@ def _download_audio_sync(url: str, workdir: Path) -> dict:
     return _extract(url, _audio_opts(workdir), download=True)
 
 
+def _alt_worth_trying(err: str) -> bool:
+    low = err.lower()
+    return not any(p in low for p in ("private video", "has been removed", "terminated", "does not pass filter",
+                                      "is not a valid url"))
+
+
 async def download_audio(video_id: str, url: str | None = None) -> AudioFile:
+    """MP3 of a YouTube video. If YouTube blocks the server, it comes through Invidious/Piped."""
+    youtube = url is None or _site(url) == "youtube"
     url = url or f"https://www.youtube.com/watch?v={video_id}"
-    return await _fetch_audio(url)
+    if youtube and youtube_blocked() and ytalt.available():
+        try:
+            return await _alt_audio(video_id)
+        except DownloadFailed:
+            pass  # instances failed; yt-dlp might work again by now
+    try:
+        return await _fetch_audio(url)
+    except DownloadFailed as e:
+        if not (youtube and ytalt.available() and _alt_worth_trying(str(e))):
+            raise
+        try:
+            return await _alt_audio(video_id)
+        except DownloadFailed as alt:
+            raise DownloadFailed(f"{e}; alt: {alt}") from e
+
+
+async def _alt_audio(video_id: str) -> AudioFile:
+    workdir = _new_workdir()
+    try:
+        info, path, cover = await _in_thread(ytalt.download_audio, video_id, workdir)
+    except Exception as e:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise DownloadFailed(f"alt: {e}") from e
+    performer, title = split_title({"title": info.title, "uploader": info.author})
+    thumb = await media.image_to_thumb(cover, workdir / "thumb_tg.jpg") if cover else None
+    return AudioFile(path=path, title=title or info.title, performer=performer,
+                     duration=info.duration or int((await media.probe(path)).get("duration") or 0), thumb=thumb)
 
 
 def _soundcloud_sync(query: str, workdir: Path) -> dict:
@@ -518,7 +552,42 @@ def _hint_for(info: dict) -> str:
     return ""
 
 
+_YT_ID = re.compile(r"(?:v=|youtu\.be/|shorts/|embed/|live/)([\w-]{11})")
+
+
 async def download_video(url: str, platform: str) -> VideoResult:
+    """Video in the best quality that fits Telegram. YouTube falls back to Invidious/Piped
+    when the server is blocked."""
+    m = _YT_ID.search(url) if platform == "youtube" else None
+    if m and youtube_blocked() and ytalt.available():
+        try:
+            return await _alt_video(m.group(1))
+        except DownloadFailed:
+            pass
+    try:
+        return await _download_video_ytdlp(url, platform)
+    except DownloadFailed as e:
+        if not (m and ytalt.available() and _alt_worth_trying(str(e))):
+            raise
+        try:
+            return await _alt_video(m.group(1))
+        except DownloadFailed as alt:
+            raise DownloadFailed(f"{e}; alt: {alt}") from e
+
+
+async def _alt_video(video_id: str) -> VideoResult:
+    workdir = _new_workdir()
+    height = min(config.max_height, 1080)
+    try:
+        info = await _in_thread(ytalt.download_video, video_id, workdir, height, config.upload_limit)
+    except Exception as e:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise DownloadFailed(f"alt: {e}") from e
+    return VideoResult(files=[workdir / f"{video_id}.mp4"], key=f"youtube:{video_id}", title=info.title,
+                       workdir=workdir)
+
+
+async def _download_video_ytdlp(url: str, platform: str) -> VideoResult:
     last_err: Exception | None = None
     heights = [h for h in HEIGHTS if h <= config.max_height] or [config.max_height]
     for height in heights:

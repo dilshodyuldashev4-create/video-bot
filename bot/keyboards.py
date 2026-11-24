@@ -86,3 +86,12 @@ def lang_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text=v, callback_data=f"l:{k}") for k, v in LANGS.items()]]
     )
+
+
+def link_kb(token: str, lang: str) -> InlineKeyboardMarkup:
+    """Choice under a pasted link: video / audio / find the music."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t(lang, "btn_dl_video"), style=ButtonStyle.PRIMARY, callback_data=f"dl:v:{token}"),
+         InlineKeyboardButton(text=t(lang, "btn_dl_audio"), style=ButtonStyle.SUCCESS, callback_data=f"dl:a:{token}")],
+        [InlineKeyboardButton(text=t(lang, "btn_dl_shazam"), style=ButtonStyle.DANGER, callback_data=f"dl:s:{token}")],
+    ])
