@@ -8,8 +8,9 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, Message
 
-from ..common import send_soundcloud, send_track, user_lock
+from ..common import react, send_soundcloud, send_track, user_lock
 from ..config import config
+from ..keyboards import shazam_kb
 from ..db import DB
 from ..services import downloader, recognizer
 from ..services.recognizer import Song
@@ -45,25 +46,58 @@ async def _fetch(bot: Bot, file_id: str, size: int | None) -> Path | None:
     return dest
 
 
-async def _deliver(message: Message, bot: Bot, db: DB, lang: str, song: Song | None, hint: str = "") -> None:
+async def _deliver(message: Message, bot: Bot, db: DB, lang: str, song: Song | None, hint: str = "") -> bool:
     """Send the recognised song as an MP3 (or say we couldn't recognise it)."""
     if not song and hint:
         artist, _, title = hint.partition(" - ")
         song = Song(title=title or hint, artist=artist if title else "")
     if not song:
         await message.reply(t(lang, "not_recognized"))
-        return
+        return False
     await db.incr("recognitions")
-    caption = t(lang, "recognized", title=esc(song.title), artist=esc(song.artist))
+    card_text = t(lang, "recognized_card", title=esc(song.title), artist=esc(song.artist))
+    card = await _send_card(message, song, card_text, lang)
+    header = t(lang, "recognized_header")
     track = await downloader.find_best(song.title, song.artist)
     try:
         if track:
-            await send_track(bot, db, message.chat.id, track.id, lang, caption=caption,
+            await send_track(bot, db, message.chat.id, track.id, lang, header=header,
                              reply_to=message.message_id, query=song.query)
         else:  # YouTube search unavailable -> straight to SoundCloud
-            await send_soundcloud(bot, db, message.chat.id, song.query, lang, caption, message.message_id)
+            await send_soundcloud(bot, db, message.chat.id, song.query, lang, header, message.message_id)
     except downloader.DownloadFailed:
         await message.reply(t(lang, "song_not_found_dl", title=esc(song.title), artist=esc(song.artist)))
+    finally:
+        await _finish_card(card, card_text)
+    return True
+
+
+async def _send_card(message: Message, song: Song, text: str, lang: str) -> Message | None:
+    """Shazam-style card: cover art + title + artist (+ "Open in Shazam")."""
+    kb = shazam_kb(song.shazam_url, lang)
+    try:
+        if song.cover:
+            return await message.reply_photo(song.cover, caption=text, reply_markup=kb)
+    except TelegramBadRequest:
+        pass  # cover URL rejected by Telegram -> text card
+    try:
+        return await message.reply(text, reply_markup=kb, disable_web_page_preview=True)
+    except TelegramBadRequest:
+        return None
+
+
+async def _finish_card(card: Message | None, text: str) -> None:
+    """Drop the "downloading MP3…" line once the MP3 is out."""
+    if not card:
+        return
+    final = text.rsplit("\n", 1)[0]
+    try:
+        if card.photo:
+            await card.edit_caption(caption=final, reply_markup=card.reply_markup)
+        else:
+            await card.edit_text(final, reply_markup=card.reply_markup, disable_web_page_preview=True)
+    except TelegramBadRequest:
+        pass
 
 
 @router.message(F.chat.type == "private", MEDIA)
@@ -73,8 +107,10 @@ async def on_media(message: Message, bot: Bot, db: DB, lang: str) -> None:
         if not ok:
             await message.reply(t(lang, "busy"))
             return
+        await react(message, "👀")
         status = await message.reply(t(lang, "recognizing"))
         path = None
+        found = False
         try:
             path = await _fetch(bot, f.file_id, f.file_size)
             if not path:
@@ -84,11 +120,12 @@ async def on_media(message: Message, bot: Bot, db: DB, lang: str) -> None:
             hint = ""
             if message.audio and not song and message.audio.title:
                 hint = f"{message.audio.performer or ''} - {message.audio.title}".strip(" -")
-            await _deliver(message, bot, db, lang, song, hint)
+            found = await _deliver(message, bot, db, lang, song, hint)
         except Exception:
             log.exception("recognition failed")
             await message.reply(t(lang, "error"))
         finally:
+            await react(message, "🔥" if found else "🙈")
             if path:
                 shutil.rmtree(path.parent, ignore_errors=True)
             try:

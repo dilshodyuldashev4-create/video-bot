@@ -22,7 +22,7 @@ async def probe(path: Path) -> dict:
     code, out, _ = await _run(
         "ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path), timeout=60
     )
-    info = {"duration": 0.0, "width": 0, "height": 0, "has_audio": False}
+    info = {"duration": 0.0, "width": 0, "height": 0, "has_audio": False, "sample_rate": 0}
     if code != 0:
         return info
     data = json.loads(out or b"{}")
@@ -43,6 +43,7 @@ async def probe(path: Path) -> dict:
             info["width"], info["height"] = w, h
         elif s.get("codec_type") == "audio":
             info["has_audio"] = True
+            info["sample_rate"] = info["sample_rate"] or int(s.get("sample_rate") or 0)
     return info
 
 
@@ -88,3 +89,31 @@ async def to_wav(src: Path, out: Path, start: float, length: float) -> Path | No
         "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(out), timeout=120,
     )
     return out if code == 0 and out.exists() and out.stat().st_size > 1000 else None
+
+
+FX = {
+    # nightcore-style: faster and higher
+    "up": lambda sr: f"asetrate={sr}*1.25,aresample={sr}",
+    # slowed + reverb: slower, deeper, with a short multi-tap echo tail
+    "slow": lambda sr: f"asetrate={sr}*0.85,aresample={sr},aecho=0.8:0.85:40|80|140:0.35|0.25|0.15",
+}
+
+
+async def make_fx(src: Path, out: Path, mode: str) -> Path | None:
+    """Speed up / slowed + reverb version of a song as 320k MP3 (keeps the cover art)."""
+    info = await probe(src)
+    sr = info["sample_rate"] or 44100
+    code, _, _ = await _run(
+        "ffmpeg", "-v", "error", "-y", "-i", str(src), "-map", "0:a:0", "-map", "0:v?", "-c:v", "copy",
+        "-af", FX[mode](sr), "-c:a", "libmp3lame", "-b:a", "320k", "-id3v2_version", "3", str(out), timeout=300,
+    )
+    return out if code == 0 and out.exists() and out.stat().st_size > 0 else None
+
+
+async def extract_cover(src: Path, out: Path) -> Path | None:
+    """Cover art embedded in an MP3 -> Telegram-sized JPEG thumbnail."""
+    code, _, _ = await _run(
+        "ffmpeg", "-v", "error", "-y", "-i", str(src), "-an", "-frames:v", "1",
+        "-vf", "scale='if(gt(iw,ih),320,-2)':'if(gt(iw,ih),-2,320)'", "-q:v", "4", str(out), timeout=60,
+    )
+    return out if code == 0 and out.exists() and out.stat().st_size > 0 else None

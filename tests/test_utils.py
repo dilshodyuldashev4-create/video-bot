@@ -75,10 +75,11 @@ def test_results_keyboard_layout():
     assert last[0][0].callback_data == "t:5:20"
     assert last[-1][2].callback_data == "p:5:0"
     text = results_text("Dior & <b>", results, 0, "ru")
-    assert "&lt;b&gt;" in text and "10. Song 9 <b>2:00</b>" in text
+    assert "&lt;b&gt;" in text and "<b>10.</b> Song 9 · <b>2:00</b>" in text and "стр. 1/3" in text
 
 
 def test_texts():
     assert guess_lang("uz") == "uz" and guess_lang("ru") == "ru" and guess_lang(None) == "ru"
     for lang in ("ru", "uz"):
-        assert "@x" in t(lang, "audio_caption", bot="x")
+        assert "@x" in t(lang, "audio_footer", bot="x")
+        assert "@x" in t(lang, "video_caption", icon="▶️", platform="YouTube", bot="x")
