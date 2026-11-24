@@ -12,7 +12,7 @@ from pathlib import Path
 import yt_dlp
 
 from ..config import config
-from . import media, mp3sites, ytalt
+from . import media, mp3sites, tiktok, ytalt
 
 log = logging.getLogger(__name__)
 
@@ -119,6 +119,9 @@ def _site(url: str) -> str:
 
 
 def _routes(url: str) -> list[dict]:
+    if config.yt_proxy and _site(url) == "youtube":
+        # a dedicated (residential) proxy for YouTube: the server IP and WARP are blocked anyway
+        return [{"proxy": config.yt_proxy}, {}]
     routes: list[dict] = [{}]
     if config.proxy:
         via = {"proxy": config.proxy}
@@ -136,6 +139,11 @@ _YT_FALLBACK_CLIENTS = (["tv_simply"], ["mweb"], ["web_safari"])
 # and songs come from the other sources straight away (no 10 s of pointless retries).
 YT_BLOCK_PAUSE = 15 * 60
 _yt_blocked_until = 0.0
+
+
+def reset_youtube_block() -> None:
+    global _yt_blocked_until
+    _yt_blocked_until = 0.0
 
 
 def youtube_blocked() -> bool:
@@ -426,12 +434,29 @@ async def download_audio(video_id: str, url: str | None = None) -> AudioFile:
     try:
         return await _fetch_audio(url)
     except DownloadFailed as e:
+        if _site(url) == "tiktok" and _alt_worth_trying(str(e)):
+            return await _tiktok_audio(url, e)
         if not (youtube and ytalt.available() and _alt_worth_trying(str(e))):
             raise
         try:
             return await _alt_audio(video_id)
         except DownloadFailed as alt:
             raise DownloadFailed(f"{e}; alt: {alt}") from e
+
+
+async def _tiktok_audio(url: str, first: Exception) -> AudioFile:
+    try:
+        res = await _tiktok_video(url)
+    except (DownloadFailed, TooBig) as e:
+        raise DownloadFailed(f"{first}; tikwm: {e}") from e
+    videos = [p for p in res.files if p.suffix == ".mp4"]
+    out = res.workdir / "audio.mp3"
+    if not videos or not await media.to_mp3(videos[0], out):
+        shutil.rmtree(res.workdir, ignore_errors=True)
+        raise DownloadFailed(f"{first}; tikwm: no audio")
+    performer, _, title = res.track_hint.partition(" - ")
+    return AudioFile(path=out, title=title or res.title[:60] or "TikTok", performer=performer or "TikTok",
+                     duration=int((await media.probe(out)).get("duration") or 0))
 
 
 async def _alt_audio(video_id: str) -> AudioFile:
@@ -567,12 +592,34 @@ async def download_video(url: str, platform: str) -> VideoResult:
     try:
         return await _download_video_ytdlp(url, platform)
     except DownloadFailed as e:
+        if platform == "tiktok" and _alt_worth_trying(str(e)):
+            try:
+                return await _tiktok_video(url)
+            except DownloadFailed as alt:
+                raise DownloadFailed(f"{e}; tikwm: {alt}") from e
         if not (m and ytalt.available() and _alt_worth_trying(str(e))):
             raise
         try:
             return await _alt_video(m.group(1))
         except DownloadFailed as alt:
             raise DownloadFailed(f"{e}; alt: {alt}") from e
+
+
+async def _tiktok_video(url: str) -> VideoResult:
+    workdir = _new_workdir()
+    try:
+        post = await _in_thread(tiktok.download, url, workdir, config.upload_limit)
+    except OverflowError:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise TooBig()
+    except Exception as e:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise DownloadFailed(str(e)) from e
+    hint = f"{post.music_author} - {post.music_title}" if post.music_title and post.music_author \
+        and "original sound" not in post.music_title.lower() else ""
+    log.info("TikTok via tikwm: %s", url)
+    return VideoResult(files=sorted(workdir.iterdir()), key=f"tiktok:{post.id or url}", title=post.title,
+                       track_hint=hint, workdir=workdir)
 
 
 async def _alt_video(video_id: str) -> VideoResult:
@@ -624,15 +671,17 @@ async def _download_video_ytdlp(url: str, platform: str) -> VideoResult:
 
 # ---------------------------------------------------------------- diagnostics (/diag)
 
-def check_route(url: str, use_proxy: bool) -> str | None:
-    """Resolve a URL without downloading. Returns None if OK, else a short error."""
-    if use_proxy and not config.proxy:
+def check_route(url: str, use_proxy: bool | str) -> str | None:
+    """Resolve a URL without downloading. Returns None if OK, else a short error.
+    use_proxy: True = PROXY_URL (WARP), a string = that proxy."""
+    proxy = use_proxy if isinstance(use_proxy, str) else (config.proxy if use_proxy else "")
+    if use_proxy and not proxy:
         return "PROXY_URL not set"
     opts = _base_opts() | {"skip_download": True, "format": "bestaudio/best"}
     if url.startswith(("scsearch", "ytsearch")):
         opts["extract_flat"] = "in_playlist"
-    if use_proxy:
-        opts["proxy"] = config.proxy
+    if proxy:
+        opts["proxy"] = proxy
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.extract_info(url, download=False)
@@ -642,5 +691,5 @@ def check_route(url: str, use_proxy: bool) -> str | None:
         return msg[:160]
 
 
-async def check_route_async(url: str, use_proxy: bool) -> str | None:
+async def check_route_async(url: str, use_proxy: bool | str) -> str | None:
     return await asyncio.to_thread(check_route, url, use_proxy)

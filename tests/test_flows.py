@@ -1,5 +1,6 @@
 """End-to-end handler flows with a fake Telegram API (no network)."""
 import datetime
+import json
 import shutil
 import subprocess
 import time
@@ -654,3 +655,65 @@ async def test_youtube_link_blocked_uses_invidious(env, monkeypatch, media_dir):
     assert alt_calls == ["Uk9u4ikJY0U"]
     assert session.of(SendVideo), "video must be sent"
     assert not any("Не получилось" in (m.text or "") for m in session.of(SendMessage))
+
+
+async def test_admin_uploads_youtube_cookies(env, monkeypatch, data_dir):
+    session, db, _, _, send_media = env
+    from aiogram.types import Document
+    from bot.config import config
+    from bot.handlers import admin
+
+    monkeypatch.setattr(config, "admin_ids", frozenset({USER.id}))
+    monkeypatch.setattr(config, "cookies_file", "")
+    payload = {"data": b"# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tabc\n"}
+
+    async def fake_download(self, file_id, destination=None, **kw):
+        Path(destination).write_bytes(payload["data"])
+
+    checked = []
+
+    async def fake_check(url, use_proxy):
+        checked.append(config.cookies)
+        return None
+
+    monkeypatch.setattr(Bot, "download", fake_download)
+    monkeypatch.setattr(downloader, "check_route_async", fake_check)
+    monkeypatch.setattr(downloader, "_yt_blocked_until", time.time() + 900)
+    await send_media(document=Document(file_id="f", file_unique_id="u", file_name="cookies.txt", file_size=100))
+    assert config.cookies == str(data_dir / "cookies.txt")
+    assert checked == [config.cookies]  # checked right away, with the new cookies
+    assert not downloader.youtube_blocked()
+    assert "YouTube работает" in session.of(EditMessageText)[-1].text
+
+    payload["data"] = b"hello"
+    await send_media(document=Document(file_id="f2", file_unique_id="u2", file_name="notes.txt", file_size=5))
+    assert "не похоже" in session.of(SendMessage)[-1].text
+    assert (data_dir / "cookies.txt").read_bytes().startswith(b"# Netscape")  # old cookies kept
+
+
+async def test_tiktok_falls_back_to_tikwm(env, monkeypatch, media_dir):
+    from bot.services import tiktok
+
+    session, _, send_text, press, _ = env
+
+    def no_formats(url, opts, download=True):
+        raise downloader.yt_dlp.utils.DownloadError("ERROR: [TikTok] 7312: No video formats found!")
+
+    def fake_get(url, referer="", timeout=20):
+        if url.startswith(tiktok.API):
+            return json.dumps({"code": 0, "data": {
+                "id": "7312", "title": "dance", "duration": 30, "author": {"nickname": "kid"},
+                "play": "/video/media/play/7312.mp4", "hdplay": "/video/media/hdplay/7312.mp4",
+                "music_info": {"title": "Dior", "author": "Pop Smoke"}}}).encode()
+        assert url == "https://www.tikwm.com/video/media/hdplay/7312.mp4"  # HD, absolute URL
+        return (media_dir / "clip.mp4").read_bytes()
+
+    monkeypatch.setattr(downloader, "_extract", no_formats)
+    monkeypatch.setattr(tiktok, "http_get", fake_get)
+    await send_text("https://vt.tiktok.com/ZSabc/")
+    await press(_choice_buttons(session)[0])
+    assert session.of(SendVideo), "video must be sent"
+    await send_text("https://vt.tiktok.com/ZSxyz/")
+    await press(_choice_buttons(session)[1])
+    audio = session.of(SendAudio)[-1]
+    assert (audio.performer, audio.title) == ("Pop Smoke", "Dior")

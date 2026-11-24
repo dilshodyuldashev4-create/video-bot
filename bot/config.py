@@ -29,6 +29,8 @@ class Config:
     cookies_file: str = field(default_factory=lambda: os.getenv("COOKIES_FILE", ""))
     # socks5/http proxy used when a site blocks the server IP (docker-compose: Cloudflare WARP)
     proxy: str = field(default_factory=lambda: os.getenv("PROXY_URL", "").strip())
+    # proxy used for YouTube only, first (e.g. a residential proxy: http://user:pass@host:port)
+    yt_proxy: str = field(default_factory=lambda: os.getenv("YT_PROXY_URL", "").strip())
     # bgutil PO-token provider for YouTube (docker-compose: pot-provider service)
     pot_url: str = field(default_factory=lambda: os.getenv("POT_PROVIDER_URL", "").strip().rstrip("/"))
     max_parallel: int = field(default_factory=lambda: _int("MAX_PARALLEL_DOWNLOADS", 4))
@@ -58,8 +60,15 @@ class Config:
         return self.data_dir / "bot.sqlite3"
 
     @property
+    def cookies_path(self) -> Path:
+        """Where cookies sent to the bot by an admin are stored (data/ is a docker volume)."""
+        return self.data_dir / "cookies.txt"
+
+    @property
     def cookies(self) -> str | None:
-        return self.cookies_file if self.cookies_file and Path(self.cookies_file).is_file() else None
+        if self.cookies_file and Path(self.cookies_file).is_file():
+            return self.cookies_file
+        return str(self.cookies_path) if self.cookies_path.is_file() else None
 
 
 config = Config()

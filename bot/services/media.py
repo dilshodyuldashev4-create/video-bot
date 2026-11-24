@@ -82,6 +82,13 @@ async def extract_audio(src: Path, out: Path, start: float = 0, length: float | 
     return out if code == 0 and out.exists() and out.stat().st_size > 0 else None
 
 
+async def to_mp3(src: Path, out: Path) -> Path | None:
+    """Audio track -> MP3 320 kbps."""
+    code, _, _ = await _run("ffmpeg", "-v", "error", "-y", "-i", str(src), "-vn", "-c:a", "libmp3lame",
+                            "-b:a", "320k", str(out), timeout=300)
+    return out if code == 0 and out.exists() and out.stat().st_size > 1000 else None
+
+
 async def to_wav(src: Path, out: Path, start: float, length: float) -> Path | None:
     """Mono 16 kHz WAV segment — the format Shazam signatures are computed from."""
     code, _, _ = await _run(
