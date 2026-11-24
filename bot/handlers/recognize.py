@@ -12,6 +12,7 @@ from aiogram.types import CallbackQuery, Message
 from ..common import react, send_song, user_lock
 from ..config import config
 from ..db import DB
+from ..keyboards import video_more_kb
 from ..services import downloader, recognizer
 from ..services.recognizer import Song
 from ..texts import t
@@ -162,6 +163,21 @@ async def on_media(message: Message, bot: Bot, db: DB, lang: str) -> None:
                 await status.delete()
             except TelegramBadRequest:
                 pass
+    await offer_video_tools(message, db, lang)
+
+
+async def offer_video_tools(message: Message, db: DB, lang: str) -> None:
+    """Under a video the user sent: ⭕ make a video note / 🎙 a voice message from it."""
+    video = message.video or (message.document if message.document and
+                              (message.document.mime_type or "").startswith("video/") else None)
+    if not video:
+        return
+    token = uuid.uuid4().hex[:12]
+    await db.put_file(f"uv:{token}", "video", video.file_id, {"size": video.file_size or 0})
+    try:
+        await message.reply(t(lang, "video_more"), reply_markup=video_more_kb(token, lang))
+    except TelegramBadRequest:
+        pass
 
 
 @router.callback_query(F.data.startswith("g:"))

@@ -138,6 +138,7 @@ async def fill_inline(bot: Bot, db: DB, inline_message_id: str, video_id: str, u
                                   parse_mode="HTML"),
             reply_markup=_share_kb(username, lang),
         )
+        await db.log_play(user_id, meta.get("title", ""), meta.get("performer", ""))
     except downloader.DownloadFailed:
         log.warning("inline download failed for %s", video_id, exc_info=True)
         await _edit_text(bot, inline_message_id, t(lang, "track_failed"))

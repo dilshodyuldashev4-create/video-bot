@@ -48,6 +48,13 @@ CREATE TABLE IF NOT EXISTS library (
     added_by INTEGER,
     created INTEGER
 );
+CREATE TABLE IF NOT EXISTS plays (
+    user_id INTEGER NOT NULL,
+    title TEXT,
+    performer TEXT,
+    created INTEGER
+);
+CREATE INDEX IF NOT EXISTS plays_user ON plays(user_id, created);
 CREATE TABLE IF NOT EXISTS stats (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL DEFAULT 0
@@ -289,3 +296,30 @@ class DB:
             rows = [r for r in await self.search_library(title, limit=10)
                     if not artist or set(_words(artist)) & set(_words(r["title"]))]
         return rows[0] if rows else None
+
+    # plays: what each user got, for "Your year" (Wrapped)
+    async def log_play(self, user_id: int, title: str, performer: str) -> None:
+        if user_id <= 0 or not (title or performer):
+            return
+        await self.conn.execute("INSERT INTO plays(user_id, title, performer, created) VALUES(?,?,?,?)",
+                                (user_id, title or "", performer or "", int(time.time())))
+        await self.conn.commit()
+
+    async def year_stats(self, user_id: int, year: int) -> dict:
+        import datetime as _dt
+        start = int(_dt.datetime(year, 1, 1).timestamp())
+        end = int(_dt.datetime(year + 1, 1, 1).timestamp())
+        args = (user_id, start, end)
+        total = await self._scalar("SELECT COUNT(*) FROM plays WHERE user_id=? AND created>=? AND created<?", *args)
+        days = await self._scalar(
+            "SELECT COUNT(DISTINCT date(created, 'unixepoch')) FROM plays WHERE user_id=? AND created>=? AND created<?",
+            *args)
+        async with self.conn.execute(
+            "SELECT performer, COUNT(*) c FROM plays WHERE user_id=? AND created>=? AND created<? AND performer<>'' "
+            "GROUP BY lower(performer) ORDER BY c DESC, max(created) DESC LIMIT 5", args) as cur:
+            artists = [(r[0], r[1]) for r in await cur.fetchall()]
+        async with self.conn.execute(
+            "SELECT title, performer, COUNT(*) c FROM plays WHERE user_id=? AND created>=? AND created<? "
+            "GROUP BY lower(performer), lower(title) ORDER BY c DESC, max(created) DESC LIMIT 5", args) as cur:
+            songs = [(r[0], r[1], r[2]) for r in await cur.fetchall()]
+        return {"total": total, "days": days, "artists": artists, "songs": songs}

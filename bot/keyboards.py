@@ -1,3 +1,4 @@
+import datetime
 from urllib.parse import quote
 
 from aiogram.enums import ButtonStyle
@@ -52,12 +53,17 @@ def share_row(bot_username: str, lang: str) -> list[InlineKeyboardButton]:
 
 
 def audio_kb(bot_username: str, lang: str, liked: bool = False) -> InlineKeyboardMarkup:
+    b = InlineKeyboardButton
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t(lang, "btn_liked" if liked else "btn_like"),
-                              style=ButtonStyle.SUCCESS if liked else ButtonStyle.DANGER, callback_data="lk")],
-        [InlineKeyboardButton(text=t(lang, "btn_lyrics"), style=ButtonStyle.SUCCESS, callback_data="ly")],
-        [InlineKeyboardButton(text=t(lang, "btn_up"), style=ButtonStyle.PRIMARY, callback_data="fx:up"),
-         InlineKeyboardButton(text=t(lang, "btn_slow"), style=ButtonStyle.PRIMARY, callback_data="fx:slow")],
+        [b(text=t(lang, "btn_liked" if liked else "btn_like"),
+           style=ButtonStyle.SUCCESS if liked else ButtonStyle.DANGER, callback_data="lk"),
+         b(text=t(lang, "btn_lyrics"), style=ButtonStyle.SUCCESS, callback_data="ly")],
+        [b(text=t(lang, "btn_up"), style=ButtonStyle.PRIMARY, callback_data="fx:up"),
+         b(text=t(lang, "btn_slow"), style=ButtonStyle.PRIMARY, callback_data="fx:slow")],
+        [b(text=t(lang, "btn_8d"), style=ButtonStyle.PRIMARY, callback_data="fx:8d"),
+         b(text=t(lang, "btn_bass"), style=ButtonStyle.PRIMARY, callback_data="fx:bass")],
+        [b(text=t(lang, "btn_minus"), callback_data="fx:minus"),
+         b(text=t(lang, "btn_ringtone"), callback_data="rt")],
         share_row(bot_username, lang),
     ])
 
@@ -65,6 +71,8 @@ def audio_kb(bot_username: str, lang: str, liked: bool = False) -> InlineKeyboar
 def video_kb(token: str, bot_username: str, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t(lang, "btn_get_song"), style=ButtonStyle.SUCCESS, callback_data=f"g:{token}")],
+        [InlineKeyboardButton(text=t(lang, "btn_note"), callback_data="vn:note"),
+         InlineKeyboardButton(text=t(lang, "btn_voice"), callback_data="vn:voice")],
         share_row(bot_username, lang),
     ])
 
@@ -74,7 +82,8 @@ def main_menu(lang: str) -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=t(lang, "menu_top_world")), KeyboardButton(text=t(lang, "menu_top_uz")),
              KeyboardButton(text=t(lang, "menu_top_ru"))],
-            [KeyboardButton(text=t(lang, "menu_my_music"))],
+            [KeyboardButton(text=t(lang, "menu_mood")), KeyboardButton(text=t(lang, "menu_my_music"))],
+            [KeyboardButton(text=t(lang, "menu_wrapped", year=datetime.date.today().year))],
             [KeyboardButton(text=t(lang, "menu_help")), KeyboardButton(text=t(lang, "menu_lang"))],
         ],
         resize_keyboard=True,
@@ -96,3 +105,18 @@ def link_kb(token: str, lang: str) -> InlineKeyboardMarkup:
          InlineKeyboardButton(text=t(lang, "btn_dl_audio"), style=ButtonStyle.SUCCESS, callback_data=f"dl:a:{token}")],
         [InlineKeyboardButton(text=t(lang, "btn_dl_shazam"), style=ButtonStyle.DANGER, callback_data=f"dl:s:{token}")],
     ])
+
+
+MOODS = ("sad", "car", "gym", "toy", "chill", "love")
+
+
+def mood_kb(lang: str) -> InlineKeyboardMarkup:
+    b = [InlineKeyboardButton(text=t(lang, f"mood_{m}"), callback_data=f"mood:{m}") for m in MOODS]
+    return InlineKeyboardMarkup(inline_keyboard=[b[i:i + 2] for i in range(0, len(b), 2)])
+
+
+def video_more_kb(token: str, lang: str) -> InlineKeyboardMarkup:
+    """Under a video the user sent: turn it into a video note / voice message."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=t(lang, "btn_note"), callback_data=f"vn:note:{token}"),
+        InlineKeyboardButton(text=t(lang, "btn_voice"), callback_data=f"vn:voice:{token}")]])
