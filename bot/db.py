@@ -55,6 +55,35 @@ CREATE TABLE IF NOT EXISTS plays (
     created INTEGER
 );
 CREATE INDEX IF NOT EXISTS plays_user ON plays(user_id, created);
+CREATE TABLE IF NOT EXISTS follows (
+    user_id INTEGER NOT NULL,
+    artist_id TEXT NOT NULL,
+    artist_name TEXT,
+    created INTEGER,
+    PRIMARY KEY (user_id, artist_id)
+);
+CREATE TABLE IF NOT EXISTS artist_state (
+    artist_id TEXT PRIMARY KEY,
+    release_id TEXT,
+    release_title TEXT,
+    checked INTEGER
+);
+CREATE TABLE IF NOT EXISTS playlists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    code TEXT UNIQUE NOT NULL,
+    created INTEGER
+);
+CREATE TABLE IF NOT EXISTS playlist_items (
+    playlist_id INTEGER NOT NULL,
+    unique_id TEXT NOT NULL,
+    file_id TEXT NOT NULL,
+    title TEXT,
+    duration INTEGER,
+    created INTEGER,
+    PRIMARY KEY (playlist_id, unique_id)
+);
 CREATE TABLE IF NOT EXISTS stats (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL DEFAULT 0
@@ -323,3 +352,80 @@ class DB:
             "GROUP BY lower(performer), lower(title) ORDER BY c DESC, max(created) DESC LIMIT 5", args) as cur:
             songs = [(r[0], r[1], r[2]) for r in await cur.fetchall()]
         return {"total": total, "days": days, "artists": artists, "songs": songs}
+
+    # artist subscriptions: new-release alerts
+    async def toggle_follow(self, user_id: int, artist_id: str, name: str) -> bool:
+        cur = await self.conn.execute("DELETE FROM follows WHERE user_id=? AND artist_id=?", (user_id, artist_id))
+        if not cur.rowcount:
+            await self.conn.execute("INSERT INTO follows(user_id, artist_id, artist_name, created) VALUES(?,?,?,?)",
+                                    (user_id, artist_id, name, int(time.time())))
+        await self.conn.commit()
+        return not cur.rowcount
+
+    async def follows_of(self, user_id: int) -> list[tuple[str, str]]:
+        async with self.conn.execute("SELECT artist_id, artist_name FROM follows WHERE user_id=? ORDER BY created",
+                                     (user_id,)) as cur:
+            return [(r[0], r[1]) for r in await cur.fetchall()]
+
+    async def followed_artists(self) -> list[tuple[str, str]]:
+        async with self.conn.execute("SELECT artist_id, max(artist_name) FROM follows GROUP BY artist_id") as cur:
+            return [(r[0], r[1]) for r in await cur.fetchall()]
+
+    async def followers(self, artist_id: str) -> list[int]:
+        async with self.conn.execute("SELECT user_id FROM follows WHERE artist_id=?", (artist_id,)) as cur:
+            return [r[0] for r in await cur.fetchall()]
+
+    async def artist_state(self, artist_id: str) -> tuple[str | None, str | None]:
+        async with self.conn.execute("SELECT release_id, release_title FROM artist_state WHERE artist_id=?",
+                                     (artist_id,)) as cur:
+            row = await cur.fetchone()
+        return (row[0], row[1]) if row else (None, None)
+
+    async def set_artist_state(self, artist_id: str, release_id: str, title: str) -> None:
+        await self.conn.execute(
+            "INSERT INTO artist_state(artist_id, release_id, release_title, checked) VALUES(?,?,?,?) "
+            "ON CONFLICT(artist_id) DO UPDATE SET release_id=excluded.release_id, "
+            "release_title=excluded.release_title, checked=excluded.checked",
+            (artist_id, release_id, title, int(time.time())))
+        await self.conn.commit()
+
+    # playlists
+    async def create_playlist(self, owner: int, name: str) -> dict:
+        import secrets
+        code = secrets.token_urlsafe(6).replace("-", "a").replace("_", "b")
+        cur = await self.conn.execute("INSERT INTO playlists(owner, name, code, created) VALUES(?,?,?,?)",
+                                      (owner, name[:60], code, int(time.time())))
+        await self.conn.commit()
+        return {"id": cur.lastrowid, "owner": owner, "name": name[:60], "code": code}
+
+    async def playlists_of(self, owner: int) -> list[dict]:
+        async with self.conn.execute(
+                "SELECT p.id, p.name, p.code, (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id) "
+                "FROM playlists p WHERE owner=? ORDER BY p.created DESC", (owner,)) as cur:
+            return [{"id": r[0], "name": r[1], "code": r[2], "count": r[3], "owner": owner}
+                    for r in await cur.fetchall()]
+
+    async def get_playlist(self, pid: int | None = None, code: str | None = None) -> dict | None:
+        sql, arg = ("id=?", pid) if pid is not None else ("code=?", code)
+        async with self.conn.execute(f"SELECT id, owner, name, code FROM playlists WHERE {sql}", (arg,)) as cur:
+            r = await cur.fetchone()
+        return {"id": r[0], "owner": r[1], "name": r[2], "code": r[3]} if r else None
+
+    async def playlist_items(self, pid: int) -> list[dict]:
+        async with self.conn.execute(
+                "SELECT file_id, title, duration FROM playlist_items WHERE playlist_id=? ORDER BY created", (pid,)) as cur:
+            return [{"id": f"fid:{r[0]}", "title": r[1] or "♪", "duration": r[2] or 0} for r in await cur.fetchall()]
+
+    async def add_to_playlist(self, pid: int, unique_id: str, file_id: str, title: str, duration: int) -> bool:
+        cur = await self.conn.execute(
+            "INSERT OR IGNORE INTO playlist_items(playlist_id, unique_id, file_id, title, duration, created) "
+            "VALUES(?,?,?,?,?,?)", (pid, unique_id, file_id, title, duration, int(time.time())))
+        await self.conn.commit()
+        return bool(cur.rowcount)
+
+    async def delete_playlist(self, pid: int, owner: int) -> bool:
+        cur = await self.conn.execute("DELETE FROM playlists WHERE id=? AND owner=?", (pid, owner))
+        if cur.rowcount:
+            await self.conn.execute("DELETE FROM playlist_items WHERE playlist_id=?", (pid,))
+        await self.conn.commit()
+        return bool(cur.rowcount)

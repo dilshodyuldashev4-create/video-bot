@@ -35,6 +35,10 @@ class Config:
     pot_url: str = field(default_factory=lambda: os.getenv("POT_PROVIDER_URL", "").strip().rstrip("/"))
     max_parallel: int = field(default_factory=lambda: _int("MAX_PARALLEL_DOWNLOADS", 8))
     max_height: int = field(default_factory=lambda: _int("MAX_VIDEO_HEIGHT", 1080))
+    # Mini App: port of the built-in web server, own https URL (optional), cloudflared metrics (docker-compose)
+    webapp_port: int = field(default_factory=lambda: _int("WEBAPP_PORT", 8080))
+    webapp_url: str = field(default_factory=lambda: os.getenv("WEBAPP_URL", "").strip().rstrip("/"))
+    tunnel_metrics: str = field(default_factory=lambda: os.getenv("TUNNEL_METRICS_URL", "").strip())
     data_dir: Path = field(default_factory=lambda: Path(os.getenv("DATA_DIR", "./data")).resolve())
 
     @property

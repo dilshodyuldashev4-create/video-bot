@@ -75,9 +75,9 @@ async def env(data_dir):
     bot = Bot("1:test", session=session)
     db = DB(data_dir / "t.sqlite3")
     await db.connect()
-    from bot.handlers import admin, inline, library, links, recognize, search, start, tools
+    from bot.handlers import admin, inline, library, links, music, recognize, search, start, tools
     for r in (admin.router, inline.router, library.router, links.router, recognize.router, search.router,
-              start.router, tools.router):
+              start.router, tools.router, music.router):
         r._parent_router = None  # allow a fresh Dispatcher per test
     dp = build_dispatcher(db)
     session.dp, session.bot = dp, bot  # for tests that feed other update types
@@ -139,9 +139,9 @@ async def test_search_list_paging_and_mp3(env, monkeypatch, fake_audio):
     kb = audio.reply_markup.inline_keyboard
     assert kb[0][0].callback_data == "lk" and kb[0][0].style is None
     assert [b.callback_data for b in kb[0]] == ["lk", "ly"]
-    assert [b.callback_data for b in kb[1]] == ["fx:up", "fx:slow"]
-    assert [b.callback_data for b in kb[2]] == ["fx:8d", "fx:bass"]
-    assert [b.callback_data for b in kb[3]] == ["fx:minus", "rt"]
+    assert [b.callback_data for b in kb[1]] == ["sim", "pl"]
+    assert [b.callback_data for b in kb[2]] == ["fol", "st"]
+    assert [b.callback_data for b in kb[3]] == ["fxm"]
     assert kb[4][1].url == "https://t.me/TestMusicBot?startgroup=true"
     assert "POP SMOKE" in audio.caption or "clip" in audio.caption
 
@@ -984,3 +984,211 @@ def test_buttons_have_no_colors():
     for kb in (keyboards.audio_kb("b", "ru"), keyboards.audio_kb("b", "ru", liked=True), keyboards.results_kb(1, 25, 1),
                keyboards.video_kb("t", "b", "ru"), keyboards.link_kb("t", "ru"), keyboards.mood_kb("ru")):
         assert all(b.style is None for row in kb.inline_keyboard for b in row)
+
+
+# ---------------------------------------------------------------- similar, follows, playlists, story, Mini App
+
+def _audio_msg(mid=7, title="Dior", performer="Pop Smoke", uid="ua1"):
+    return Message(message_id=mid, date=NOW, chat=CHAT,
+                   audio=Audio(file_id=f"F{uid}", file_unique_id=uid, duration=180, title=title, performer=performer))
+
+
+def test_deezer_parsing(monkeypatch):
+    from bot.services import deezer
+    pages = {
+        "/search?q=Pop%20Smoke%20Dior&limit=10": {"data": [
+            {"id": 1, "title": "Dior", "artist": {"id": 5, "name": "Pop Smoke"}}]},
+        "/artist/5/radio?limit=40": {"data": [
+            {"title": "Dior", "artist": {"name": "Pop Smoke"}},
+            {"title": "Mood Swings", "artist": {"name": "Pop Smoke"}},
+            {"title": "Gang Gang", "artist": {"name": "Sheff G"}}]},
+        "/artist/5/related?limit=8": {"data": [{"id": 9, "name": "Fivio Foreign"}]},
+        "/artist/9/top?limit=3": {"data": [{"title": "Big Drip", "artist": {"name": "Fivio Foreign"}}]},
+        "/search/artist?q=Pop%20Smoke&limit=5": {"data": [{"id": 5, "name": "Pop Smoke", "picture_xl": "P"}]},
+        "/artist/5/albums?limit=50": {"data": [
+            {"id": 10, "title": "Old", "release_date": "2020-07-03"},
+            {"id": 11, "title": "New Single", "release_date": "2026-11-20", "cover_xl": "C", "record_type": "single"}]},
+    }
+    monkeypatch.setattr(deezer, "_get", lambda path: pages[path])
+    assert deezer.similar("Dior", "Pop Smoke") == ["Pop Smoke - Mood Swings", "Sheff G - Gang Gang",
+                                                   "Fivio Foreign - Big Drip"]
+    assert deezer.find_artist("Pop Smoke") == {"id": "5", "name": "Pop Smoke", "picture": "P"}
+    rel = deezer.latest_release("5")
+    assert rel["id"] == "11" and rel["cover"] == "C" and rel["type"] == "single"
+    assert deezer.is_fresh(datetime.date.today().isoformat()) and not deezer.is_fresh("2020-07-03")
+
+
+async def test_effects_menu_opens_and_closes(env):
+    from aiogram.methods import EditMessageReplyMarkup
+    session, _, _, press, _ = env
+    await press("fxm", message=_audio_msg())
+    kb = session.of(EditMessageReplyMarkup)[-1].reply_markup.inline_keyboard
+    assert [b.callback_data for b in kb[1]] == ["fx:up", "fx:slow"] and kb[4][0].callback_data == "fxb"
+    await press("fxb", message=_audio_msg())
+    kb = session.of(EditMessageReplyMarkup)[-1].reply_markup.inline_keyboard
+    assert kb[1][0].callback_data == "sim"
+
+
+async def test_similar_tracks(env, monkeypatch):
+    from bot.services import deezer
+    session, db, _, press, _ = env
+    monkeypatch.setattr(deezer, "similar", lambda title, artist: ["Sheff G - Gang Gang", "Fivio Foreign - Big Drip"])
+    await press("sim", message=_audio_msg())
+    edit = session.of(EditMessageText)[-1]
+    assert "Похоже на «Pop Smoke - Dior»" in edit.text and "Sheff G - Gang Gang" in edit.text
+    assert edit.reply_markup.inline_keyboard[0][0].callback_data.startswith("t:")
+    sid = int(edit.reply_markup.inline_keyboard[0][0].callback_data.split(":")[1])
+    _, items = await db.get_search(sid)
+    assert items[0]["id"] == "q:Sheff G - Gang Gang"
+
+
+async def test_follow_artist_and_release_alert(env, monkeypatch):
+    from bot.handlers import music
+    from bot.handlers import search as search_handler
+    from bot.services import deezer
+    session, db, _, press, _ = env
+    monkeypatch.setattr(deezer, "find_artist", lambda name: {"id": "5", "name": "Pop Smoke", "picture": ""})
+    release = {"id": "10", "title": "Old", "date": "2020-07-03", "cover": "", "type": "album"}
+    monkeypatch.setattr(deezer, "latest_release", lambda aid: dict(release))
+    await press("fol", message=_audio_msg())
+    assert "слежу за Pop Smoke" in session.of(AnswerCallbackQuery)[-1].text
+    assert await db.follows_of(USER.id) == [("5", "Pop Smoke")]
+
+    bot = session.bot
+    assert await music.check_releases(bot, db) == 0  # nothing new
+    release.update(id="11", title="New Single", date=datetime.date.today().isoformat(), cover="https://x/c.jpg")
+    assert await music.check_releases(bot, db) == 1
+    photo = session.of(SendPhoto)[-1]
+    assert photo.chat_id == USER.id and "New Single" in photo.caption
+    assert photo.reply_markup.inline_keyboard[0][0].callback_data == "nr:5"
+    assert await music.check_releases(bot, db) == 0  # announced once
+
+    asked = []
+
+    async def fake_send(bot, db, chat_id, query, lang):
+        asked.append(query)
+
+    monkeypatch.setattr(search_handler, "send_by_query", fake_send)
+    await press("nr:5")
+    assert asked == ["Pop Smoke - New Single"]
+    await press("fol", message=_audio_msg())  # second tap unfollows
+    assert await db.follows_of(USER.id) == []
+
+
+async def test_playlists_flow(env):
+    from aiogram.methods import EditMessageReplyMarkup
+    session, db, send_text, press, _ = env
+    await send_text("📂 Плейлисты")
+    assert "Плейлистов пока нет" in session.of(SendMessage)[-1].text
+    await press("pl", message=_audio_msg())
+    kb = session.of(EditMessageReplyMarkup)[-1].reply_markup.inline_keyboard
+    assert kb[0][0].callback_data == "pln"
+    await press("pln", message=_audio_msg())
+    assert "название" in session.of(SendMessage)[-1].text
+    await send_text("Вечер  в машине")
+    msg = session.of(SendMessage)[-1]
+    assert "Вечер в машине" in msg.text and "Pop Smoke - Dior" in msg.text
+    pl = (await db.playlists_of(USER.id))[0]
+    share = msg.reply_markup.inline_keyboard[-1]
+    assert "start%3Dpl_" + pl["code"] in share[0].url and share[1].callback_data == f"pld:{pl['id']}"
+
+    await press(f"pla:{pl['id']}", message=_audio_msg(title="Welcome", uid="ua2"))
+    await press(f"pla:{pl['id']}", message=_audio_msg(title="Welcome", uid="ua2"))
+    assert "Уже есть" in session.of(AnswerCallbackQuery)[-1].text
+    assert [i["title"] for i in await db.playlist_items(pl["id"])] == ["Pop Smoke - Dior", "Pop Smoke - Welcome"]
+
+    await send_text("/playlists")
+    assert session.of(SendMessage)[-1].reply_markup.inline_keyboard[0][0].callback_data == f"plo:{pl['id']}"
+    await send_text(f"/start pl_{pl['code']}")  # the shared link opens the playlist
+    assert "Вечер в машине" in session.of(SendMessage)[-1].text
+    await send_text("Dior")  # no longer waiting for a name: a normal search
+    assert len(await db.playlists_of(USER.id)) == 1
+    await press(f"pld:{pl['id']}")
+    assert await db.playlists_of(USER.id) == []
+
+
+async def test_story_clip(env, monkeypatch, stereo_mp3, tmp_path):
+    from bot.services import lyrics, story
+    assert story.lyric_line("[Chorus]\nBaby I'm on the road tonight\nshort\nBaby I'm on the road tonight\n"
+                            "Another line here too") == "Baby I'm on the road tonight"
+    assert story.lyric_line(None) == ""
+    session, _, _, press, _ = env
+    _fake_download(monkeypatch, stereo_mp3)
+    monkeypatch.setattr(lyrics, "find", lambda title, artist: "I got the Dior on me\nYeah yeah\nI got the Dior on me")
+    await press("st", message=_audio_msg())
+    video = session.of(SendVideo)[-1]
+    assert video.width == 1080 and video.height == 1920 and "сторис" in video.caption
+    info = _probe(Path(video.video.path)) if Path(str(getattr(video.video, "path", ""))).exists() else None
+    if info:  # the temp dir may already be gone
+        assert 14 <= float(info["format"]["duration"]) <= 16
+
+
+def _init_data(token: str, user_id: int = 42) -> str:
+    import hashlib
+    import hmac
+    from urllib.parse import urlencode
+    fields = {"auth_date": str(int(time.time())), "query_id": "AAA",
+              "user": json.dumps({"id": user_id, "first_name": "D", "language_code": "ru"}, separators=(",", ":"))}
+    check = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
+    secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
+    fields["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
+    return urlencode(fields)
+
+
+async def test_mini_app_api(env, monkeypatch, stereo_mp3):
+    from aiohttp.test_utils import TestClient, TestServer
+    from bot.config import config
+    from bot.webapp import server
+    session, db, _, _, _ = env
+    monkeypatch.setattr(config, "bot_token", "1:test")
+    _fake_download(monkeypatch, stereo_mp3)
+    await db.toggle_like(USER.id, "u1", "FILE1", "Pop Smoke - Dior", 180)
+
+    async def fake_search(q, limit=30):
+        return [downloader.Track(id="abcdefghijk", title="Pop Smoke - Dior (Official Video)", duration=173)]
+
+    monkeypatch.setattr(downloader, "search", fake_search)
+    client = TestClient(TestServer(server.make_app(session.bot, db)))
+    await client.start_server()
+    try:
+        h = {"X-Init-Data": _init_data("1:test")}
+        assert (await client.get("/api/me")).status == 401
+        assert (await client.get("/api/me", headers={"X-Init-Data": _init_data("2:other")})).status == 401
+        me = await (await client.get("/api/me", headers=h)).json()
+        assert me["likes"][0]["id"] == "fid:FILE1" and me["lang"] == "ru"
+        found = await (await client.get("/api/search?q=dior", headers=h)).json()
+        assert found["items"][0]["id"] == "abcdefghijk"
+        r = await (await client.post("/api/play", headers=h, json={"id": "fid:FILE1"})).json()
+        assert r["url"].startswith("/api/stream?f=FILE1&s=")
+        assert (await client.get("/api/stream?f=FILE1&s=bad")).status == 403
+        full = await client.get(r["url"])
+        assert full.status == 200 and full.headers["Content-Type"] == "audio/mpeg"
+        body = await full.read()
+        part = await client.get(r["url"], headers={"Range": "bytes=0-99"})
+        assert part.status == 206 and await part.read() == body[:100]
+        page = await client.get("/")
+        assert page.status == 200 and "telegram-web-app.js" in await page.text()
+    finally:
+        await client.close()
+
+
+async def test_mini_app_url_from_quick_tunnel(env, monkeypatch):
+    from aiogram.methods import SetChatMenuButton
+    from bot.config import config
+    from bot.webapp import server
+    session, _, _, _, _ = env
+    monkeypatch.setattr(config, "webapp_url", "")
+    monkeypatch.setattr(config, "tunnel_metrics", "http://cloudflared:2000")
+    monkeypatch.setattr(server, "http_get", lambda url, timeout=5: b'{"hostname":"abc-def.trycloudflare.com"}')
+    monkeypatch.setitem(server._state, "url", "")
+    assert await server.refresh_url(session.bot) == "https://abc-def.trycloudflare.com"
+    btn = session.of(SetChatMenuButton)[-1].menu_button
+    assert btn.web_app.url == "https://abc-def.trycloudflare.com"
+    await (await _feed_text(session, "/app"))
+    sent = session.of(SendMessage)[-1]
+    assert sent.reply_markup.inline_keyboard[0][0].web_app.url == "https://abc-def.trycloudflare.com"
+
+
+async def _feed_text(session, text):
+    msg = Message(message_id=999, date=NOW, chat=CHAT, from_user=USER, text=text).as_(session.bot)
+    return session.dp.feed_update(session.bot, Update(update_id=99999, message=msg).as_(session.bot))

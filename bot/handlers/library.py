@@ -12,7 +12,7 @@ from aiogram.types import CallbackQuery, FSInputFile, Message
 from ..common import audio_caption, bot_username, react, user_lock
 from ..config import config
 from ..db import DB, norm_text
-from ..keyboards import audio_kb, results_kb, results_text
+from ..keyboards import audio_kb, is_expanded, results_kb, results_text
 from ..services import charts, lyrics, media
 from ..texts import LINE, menu_labels, t
 from ..utils import esc
@@ -43,7 +43,8 @@ async def cb_like(call: CallbackQuery, bot: Bot, db: DB, lang: str) -> None:
     liked = await db.toggle_like(call.from_user.id, audio.file_unique_id, audio.file_id, title, audio.duration or 0)
     await call.answer(t(lang, "liked" if liked else "unliked"))
     try:
-        await call.message.edit_reply_markup(reply_markup=audio_kb(await bot_username(bot), lang, liked=liked))
+        await call.message.edit_reply_markup(reply_markup=audio_kb(await bot_username(bot), lang, liked=liked,
+                                                                   expanded=is_expanded(call.message.reply_markup)))
     except TelegramBadRequest:
         pass
 
@@ -183,20 +184,18 @@ def _lyric_chunks(text: str, size: int = 3800) -> list[str]:
     return chunks or [text[:size]]
 
 
-@router.callback_query(F.data == "ly")
-async def cb_lyrics(call: CallbackQuery, db: DB, lang: str) -> None:
-    """📝 under an MP3: the song's lyrics."""
-    audio = call.message.audio if call.message else None
-    if not audio:
-        await call.answer("😔", show_alert=False)
-        return
+def audio_names(audio) -> tuple[str, str]:
+    """(performer, title) of a Telegram audio, from its tags or its file name."""
     performer, title = (audio.performer or "").strip(), (audio.title or "").strip()
     if not title and audio.file_name:
         performer, _, title = audio.file_name.rsplit(".", 1)[0].partition(" - ")
         if not title:
             performer, title = "", performer
+    return performer.strip(), title.strip()
+
+
+async def lyrics_for(db: DB, title: str, performer: str) -> str | None:
     name = f"{performer} - {title}" if performer else title
-    await call.answer("📝")
     key = "ly:" + norm_text(name)[:200]
     cached = await db.get_file(key)
     text = cached[2].get("text") if cached else None
@@ -204,6 +203,20 @@ async def cb_lyrics(call: CallbackQuery, db: DB, lang: str) -> None:
         text = await asyncio.to_thread(lyrics.find, title, performer)
         if text:
             await db.put_file(key, "lyrics", "-", {"text": text})
+    return text
+
+
+@router.callback_query(F.data == "ly")
+async def cb_lyrics(call: CallbackQuery, db: DB, lang: str) -> None:
+    """📝 under an MP3: the song's lyrics."""
+    audio = call.message.audio if call.message else None
+    if not audio:
+        await call.answer("😔", show_alert=False)
+        return
+    performer, title = audio_names(audio)
+    name = f"{performer} - {title}" if performer else title
+    await call.answer("📝")
+    text = await lyrics_for(db, title, performer)
     if not text:
         await call.message.reply(t(lang, "lyrics_none", name=esc(name)))
         return

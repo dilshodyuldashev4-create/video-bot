@@ -12,7 +12,7 @@ from aiogram.types import BotCommand
 
 from .config import config
 from .db import DB
-from .handlers import admin, inline, library, links, recognize, search, start, tools
+from .handlers import admin, inline, library, links, music, recognize, search, start, tools
 from .middlewares import LangMiddleware
 from .services import downloader
 from .utils import cleanup_old
@@ -41,7 +41,7 @@ def build_dispatcher(db: DB) -> Dispatcher:
     dp.inline_query.outer_middleware(mw)
     dp.chosen_inline_result.outer_middleware(mw)
     # order matters: commands, then links, then media, then plain text = search
-    dp.include_routers(admin.router, start.router, inline.router, library.router, links.router, recognize.router,
+    dp.include_routers(admin.router, music.router, start.router, inline.router, library.router, links.router, recognize.router,
                        tools.router, search.router)
     return dp
 
@@ -66,19 +66,25 @@ async def main() -> None:
     await bot.set_my_commands([
         BotCommand(command="start", description="🏠 Start / Старт"),
         BotCommand(command="mymusic", description="❤️ My music / Моя музыка"),
+        BotCommand(command="app", description="🎧 Player / Плеер"),
+        BotCommand(command="playlists", description="📂 Playlists / Плейлисты"),
+        BotCommand(command="follows", description="🔔 Artists I follow / Мои артисты"),
         BotCommand(command="mood", description="🎧 Mood / Настроение"),
         BotCommand(command="wrapped", description="📊 My year / Мой год"),
         BotCommand(command="help", description="📖 Help / Помощь"),
         BotCommand(command="lang", description="🌐 Language / Til / Язык"),
     ])
-    task = asyncio.create_task(housekeeping(db))
+    from .webapp import server as webapp
+    tasks = [asyncio.create_task(housekeeping(db)), asyncio.create_task(music.release_watcher(bot, db)),
+             asyncio.create_task(webapp.run(bot, db))]
     me = await bot.me()
     log.info("Started @%s (local API: %s, upload limit %d MB)", me.username, config.local_api,
              config.upload_limit // 2**20)
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
-        task.cancel()
+        for task in tasks:
+            task.cancel()
         await db.close()
         await bot.session.close()
 

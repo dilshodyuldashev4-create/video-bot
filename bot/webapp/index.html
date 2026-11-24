@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Плеер</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #0f0f14);
+    --bg2: var(--tg-theme-secondary-bg-color, #1b1b24);
+    --text: var(--tg-theme-text-color, #ffffff);
+    --hint: var(--tg-theme-hint-color, #8d8d99);
+    --accent: var(--tg-theme-button-color, #ff2e63);
+    --accent-text: var(--tg-theme-button-text-color, #ffffff);
+    --sep: color-mix(in srgb, var(--hint) 20%, transparent);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { padding: 0 16px calc(120px + env(safe-area-inset-bottom)); }
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 12px 0 8px; }
+  h1 { font-size: 22px; margin: 4px 0 12px; }
+  .search { display: flex; gap: 8px; }
+  .search input { flex: 1; min-width: 0; border: 0; border-radius: 12px; padding: 12px 14px; font-size: 16px;
+    background: var(--bg2); color: var(--text); outline: none; }
+  .tabs { display: flex; gap: 6px; margin-top: 10px; }
+  .tab { flex: 1; border: 0; border-radius: 10px; padding: 9px 4px; background: var(--bg2); color: var(--text);
+    font-size: 14px; }
+  .tab.on { background: var(--accent); color: var(--accent-text); }
+  .list { margin-top: 6px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--sep); }
+  .row .n { width: 22px; text-align: center; color: var(--hint); font-variant-numeric: tabular-nums; }
+  .row .t { flex: 1; min-width: 0; }
+  .row .t b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .t span { color: var(--hint); font-size: 13px; }
+  .row.playing .t b { color: var(--accent); }
+  .row .go { width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--bg2); color: var(--text);
+    font-size: 15px; flex: none; }
+  .pl { padding: 14px; border-radius: 14px; background: var(--bg2); margin: 10px 0; }
+  .pl b { font-size: 16px; } .pl span { color: var(--hint); }
+  .empty { color: var(--hint); text-align: center; padding: 40px 10px; }
+  .back { border: 0; background: none; color: var(--accent); font-size: 15px; padding: 8px 0; }
+  .player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; background: var(--bg2);
+    padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); box-shadow: 0 -6px 20px rgba(0,0,0,.25);
+    transform: translateY(110%); transition: transform .25s; }
+  .player.show { transform: none; }
+  .player .now { display: flex; align-items: center; gap: 10px; }
+  .player .now .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-weight: 600; }
+  .player button { border: 0; background: none; color: var(--text); font-size: 22px; width: 40px; height: 40px; }
+  .player .pp { background: var(--accent); color: var(--accent-text); border-radius: 50%; font-size: 18px; }
+  .bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: var(--hint); font-size: 12px;
+    font-variant-numeric: tabular-nums; }
+  .bar input { flex: 1; accent-color: var(--accent); }
+  .toast { position: fixed; left: 16px; right: 16px; top: 12px; z-index: 20; background: var(--text);
+    color: var(--bg); padding: 10px 14px; border-radius: 12px; opacity: 0; transition: opacity .2s;
+    pointer-events: none; text-align: center; }
+  .toast.show { opacity: .95; }
+  .spin { display: inline-block; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">🎧</h1>
+  <form class="search" id="form"><input id="q" type="search" autocomplete="off" enterkeyhint="search"></form>
+  <div class="tabs">
+    <button class="tab on" data-tab="search" id="tab-search"></button>
+    <button class="tab" data-tab="likes" id="tab-likes"></button>
+    <button class="tab" data-tab="playlists" id="tab-playlists"></button>
+  </div>
+</header>
+<main class="list" id="list"></main>
+
+<div class="player" id="player">
+  <div class="now">
+    <div class="t" id="now">—</div>
+    <button id="prev" aria-label="prev">⏮</button>
+    <button id="pp" class="pp" aria-label="play">▶</button>
+    <button id="next" aria-label="next">⏭</button>
+  </div>
+  <div class="bar"><span id="cur">0:00</span><input id="seek" type="range" min="0" max="100" value="0" step="0.1"><span id="dur">0:00</span></div>
+</div>
+<div class="toast" id="toast"></div>
+<audio id="audio" preload="auto"></audio>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+const init = tg ? tg.initData : "";
+if (tg) { tg.ready(); tg.expand(); }
+
+const L = {
+  ru: {title: "🎧 Плеер", q: "Песня или исполнитель", search: "🔎 Поиск", likes: "❤️ Моё", playlists: "📂 Плейлисты",
+       hint: "Напиши название песни 👆", none: "Ничего не нашлось", likesEmpty: "Нажми ❤️ под треком в боте, и он появится здесь",
+       plEmpty: "Плейлистов пока нет. Создай их кнопкой «📂 В плейлист» под треком", tracks: "треков", back: "← Назад",
+       loading: "Загружаю…", sent: "Трек также пришёл в чат с ботом 💾", err: "Не получилось, попробуй ещё раз"},
+  uz: {title: "🎧 Pleyer", q: "Qo'shiq yoki ijrochi", search: "🔎 Qidiruv", likes: "❤️ Meniki", playlists: "📂 Pleylistlar",
+       hint: "Qo'shiq nomini yozing 👆", none: "Hech narsa topilmadi", likesEmpty: "Botda trek ostidagi ❤️ ni bosing, u shu yerda paydo bo'ladi",
+       plEmpty: "Hozircha pleylist yo'q. Trek ostidagi «📂 Pleylistga» tugmasi bilan yarating", tracks: "ta trek", back: "← Orqaga",
+       loading: "Yuklanmoqda…", sent: "Trek bot chatiga ham yuborildi 💾", err: "Bo'lmadi, yana urinib ko'ring"},
+  en: {title: "🎧 Player", q: "Song or artist", search: "🔎 Search", likes: "❤️ Mine", playlists: "📂 Playlists",
+       hint: "Type a song name 👆", none: "Nothing found", likesEmpty: "Tap ❤️ under a track in the bot and it shows up here",
+       plEmpty: "No playlists yet. Create one with «📂 To playlist» under a track", tracks: "tracks", back: "← Back",
+       loading: "Loading…", sent: "The track also arrived in your chat with the bot 💾", err: "Didn't work, try again"},
+};
+let lang = ((tg && tg.initDataUnsafe.user && tg.initDataUnsafe.user.language_code) || "ru").slice(0, 2);
+if (!L[lang]) lang = "ru";
+const S = k => L[lang][k];
+
+const $ = id => document.getElementById(id);
+const audio = $("audio");
+let me = {likes: [], playlists: []};
+let results = [], queue = [], qi = -1, tab = "search", openPl = null;
+
+function applyLang() {
+  document.documentElement.lang = lang;
+  $("title").textContent = S("title"); $("q").placeholder = S("q");
+  $("tab-search").textContent = S("search"); $("tab-likes").textContent = S("likes");
+  $("tab-playlists").textContent = S("playlists");
+}
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {...opts, headers: {"X-Init-Data": init, "Content-Type": "application/json"}});
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(data.error || S("err")); e.api = true; throw e; }
+  return data;
+}
+
+function toast(text) {
+  const el = $("toast"); el.textContent = text; el.classList.add("show");
+  clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("show"), 2600);
+}
+
+const fmt = s => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+function split(title) {
+  const i = title.indexOf(" - ");
+  return i > 0 ? [title.slice(i + 3), title.slice(0, i)] : [title, ""];
+}
+
+function renderTracks(items, empty, list = $("list")) {
+  if (!items.length) { list.innerHTML = `<div class="empty">${esc(empty)}</div>`; return; }
+  const playing = qi >= 0 && queue[qi] ? queue[qi].id : null;
+  list.innerHTML = items.map((it, i) => {
+    const [name, artist] = split(it.title);
+    const sub = [artist, it.duration ? fmt(it.duration) : ""].filter(Boolean).join(" · ");
+    return `<div class="row ${it.id === playing ? "playing" : ""}" data-i="${i}">
+      <div class="n">${i + 1}</div><div class="t"><b>${esc(name)}</b><span>${esc(sub)}</span></div>
+      <button class="go" data-i="${i}">${it.id === playing && !audio.paused ? "❚❚" : "▶"}</button></div>`;
+  }).join("");
+  list.querySelectorAll(".row").forEach(el => el.onclick = () => playFrom(items, +el.dataset.i));
+}
+
+function renderPlaylists() {
+  const list = $("list");
+  if (openPl) {
+    list.innerHTML = `<button class="back" id="back">${esc(S("back"))}</button><h1>📂 ${esc(openPl.name)}</h1><div id="rows"></div>`;
+    $("back").onclick = () => { openPl = null; render(); };
+    renderTracks(openPl.items, S("none"), $("rows"));
+    return;
+  }
+  if (!me.playlists.length) { list.innerHTML = `<div class="empty">${esc(S("plEmpty"))}</div>`; return; }
+  list.innerHTML = me.playlists.map((p, i) =>
+    `<div class="pl" data-i="${i}"><b>📂 ${esc(p.name)}</b><br><span>${p.items.length} ${esc(S("tracks"))}</span></div>`).join("");
+  list.querySelectorAll(".pl").forEach(el => el.onclick = () => { openPl = me.playlists[+el.dataset.i]; render(); });
+}
+
+function render() {
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
+  $("form").style.display = tab === "search" ? "" : "none";
+  if (tab === "search") renderTracks(results, $("q").value.trim().length < 2 ? S("hint") : S("none"));
+  else if (tab === "likes") renderTracks(me.likes, S("likesEmpty"));
+  else renderPlaylists();
+}
+
+async function playFrom(items, i) {
+  if (queue === items && qi === i && audio.src) { audio.paused ? audio.play() : audio.pause(); return; }
+  queue = items; qi = i;
+  await playCurrent();
+}
+
+async function playCurrent() {
+  const it = queue[qi]; if (!it) return;
+  const [name, artist] = split(it.title);
+  $("now").innerHTML = `<span class="spin">⏳</span> ${esc(name)}`;
+  $("player").classList.add("show");
+  if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+  try {
+    if (!it.url) {
+      const r = await api("/api/play", {method: "POST", body: JSON.stringify({id: it.id, title: it.title})});
+      it.url = r.url; if (r.sent) toast(S("sent"));
+    }
+    if (queue[qi] !== it) return; // the user picked another track meanwhile
+    audio.src = it.url; await audio.play();
+    $("now").textContent = artist ? `${name} — ${artist}` : name;
+    if ("mediaSession" in navigator) navigator.mediaSession.metadata = new MediaMetadata({title: name, artist});
+  } catch (e) {
+    $("now").textContent = name; toast(e.api ? e.message : S("err"));
+  }
+  render();
+}
+
+function step(d) { if (!queue.length) return; qi = (qi + d + queue.length) % queue.length; playCurrent(); }
+
+audio.addEventListener("play", () => { $("pp").textContent = "❚❚"; render(); });
+audio.addEventListener("pause", () => { $("pp").textContent = "▶"; render(); });
+audio.addEventListener("ended", () => step(1));
+audio.addEventListener("timeupdate", () => {
+  $("cur").textContent = fmt(audio.currentTime); $("dur").textContent = fmt(audio.duration);
+  if (audio.duration) $("seek").value = audio.currentTime / audio.duration * 100;
+});
+$("seek").oninput = e => { if (audio.duration) audio.currentTime = e.target.value / 100 * audio.duration; };
+$("pp").onclick = () => audio.src && (audio.paused ? audio.play() : audio.pause());
+$("prev").onclick = () => step(-1);
+$("next").onclick = () => step(1);
+if ("mediaSession" in navigator) {
+  navigator.mediaSession.setActionHandler("previoustrack", () => step(-1));
+  navigator.mediaSession.setActionHandler("nexttrack", () => step(1));
+}
+
+document.querySelectorAll(".tab").forEach(b => b.onclick = () => { tab = b.dataset.tab; openPl = null; render(); });
+
+let searchSeq = 0;
+$("form").onsubmit = async e => {
+  e.preventDefault();
+  const q = $("q").value.trim(); if (q.length < 2) return;
+  $("q").blur();
+  const seq = ++searchSeq;
+  $("list").innerHTML = `<div class="empty"><span class="spin">⏳</span> ${esc(S("loading"))}</div>`;
+  try { const r = await api("/api/search?q=" + encodeURIComponent(q)); if (seq === searchSeq) results = r.items; }
+  catch (err) { toast(err.message); results = []; }
+  if (seq === searchSeq) render();
+};
+
+(async () => {
+  applyLang(); render();
+  try {
+    me = await api("/api/me");
+    if (me.lang && L[me.lang]) { lang = me.lang; applyLang(); }
+    const start = tg && tg.initDataUnsafe.start_param;
+    if (start && start.startsWith("pl_")) {
+      const pl = await api("/api/playlist/" + encodeURIComponent(start.slice(3)));
+      tab = "playlists"; openPl = pl;
+    } else if (me.likes.length) { tab = "likes"; }
+  } catch (e) { toast(e.message); }
+  render();
+})();
+</script>
+</body>
+</html>
