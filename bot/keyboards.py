@@ -1,7 +1,6 @@
 import datetime
 from urllib.parse import quote
 
-from aiogram.enums import ButtonStyle
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
 from .texts import LANGS, t
@@ -32,11 +31,9 @@ def results_kb(search_id: int, total: int, page: int) -> InlineKeyboardMarkup:
     rows = [nums[:5], nums[5:]] if count > 5 else [nums]
     last_page = pages_of(total) - 1
     rows.append([
-        InlineKeyboardButton(text="⬅️", style=ButtonStyle.PRIMARY,
-                             callback_data=f"p:{search_id}:{page - 1 if page > 0 else last_page}"),
-        InlineKeyboardButton(text="❌", style=ButtonStyle.DANGER, callback_data="x"),
-        InlineKeyboardButton(text="➡️", style=ButtonStyle.PRIMARY,
-                             callback_data=f"p:{search_id}:{page + 1 if page < last_page else 0}"),
+        InlineKeyboardButton(text="⬅️", callback_data=f"p:{search_id}:{page - 1 if page > 0 else last_page}"),
+        InlineKeyboardButton(text="❌", callback_data="x"),
+        InlineKeyboardButton(text="➡️", callback_data=f"p:{search_id}:{page + 1 if page < last_page else 0}"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=[r for r in rows if r])
 
@@ -47,7 +44,7 @@ def share_url(bot_username: str, lang: str) -> str:
 
 def share_row(bot_username: str, lang: str) -> list[InlineKeyboardButton]:
     return [
-        InlineKeyboardButton(text=t(lang, "btn_share"), style=ButtonStyle.PRIMARY, url=share_url(bot_username, lang)),
+        InlineKeyboardButton(text=t(lang, "btn_share"), url=share_url(bot_username, lang)),
         InlineKeyboardButton(text=t(lang, "btn_add_group"), url=f"https://t.me/{bot_username}?startgroup=true"),
     ]
 
@@ -55,13 +52,12 @@ def share_row(bot_username: str, lang: str) -> list[InlineKeyboardButton]:
 def audio_kb(bot_username: str, lang: str, liked: bool = False) -> InlineKeyboardMarkup:
     b = InlineKeyboardButton
     return InlineKeyboardMarkup(inline_keyboard=[
-        [b(text=t(lang, "btn_liked" if liked else "btn_like"),
-           style=ButtonStyle.SUCCESS if liked else ButtonStyle.DANGER, callback_data="lk"),
-         b(text=t(lang, "btn_lyrics"), style=ButtonStyle.SUCCESS, callback_data="ly")],
-        [b(text=t(lang, "btn_up"), style=ButtonStyle.PRIMARY, callback_data="fx:up"),
-         b(text=t(lang, "btn_slow"), style=ButtonStyle.PRIMARY, callback_data="fx:slow")],
-        [b(text=t(lang, "btn_8d"), style=ButtonStyle.PRIMARY, callback_data="fx:8d"),
-         b(text=t(lang, "btn_bass"), style=ButtonStyle.PRIMARY, callback_data="fx:bass")],
+        [b(text=t(lang, "btn_liked" if liked else "btn_like"), callback_data="lk"),
+         b(text=t(lang, "btn_lyrics"), callback_data="ly")],
+        [b(text=t(lang, "btn_up"), callback_data="fx:up"),
+         b(text=t(lang, "btn_slow"), callback_data="fx:slow")],
+        [b(text=t(lang, "btn_8d"), callback_data="fx:8d"),
+         b(text=t(lang, "btn_bass"), callback_data="fx:bass")],
         [b(text=t(lang, "btn_minus"), callback_data="fx:minus"),
          b(text=t(lang, "btn_ringtone"), callback_data="rt")],
         share_row(bot_username, lang),
@@ -70,7 +66,7 @@ def audio_kb(bot_username: str, lang: str, liked: bool = False) -> InlineKeyboar
 
 def video_kb(token: str, bot_username: str, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t(lang, "btn_get_song"), style=ButtonStyle.SUCCESS, callback_data=f"g:{token}")],
+        [InlineKeyboardButton(text=t(lang, "btn_get_song"), callback_data=f"g:{token}")],
         [InlineKeyboardButton(text=t(lang, "btn_note"), callback_data="vn:note"),
          InlineKeyboardButton(text=t(lang, "btn_voice"), callback_data="vn:voice")],
         share_row(bot_username, lang),
@@ -101,9 +97,9 @@ def lang_kb() -> InlineKeyboardMarkup:
 def link_kb(token: str, lang: str) -> InlineKeyboardMarkup:
     """Choice under a pasted link: video / audio / find the music."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t(lang, "btn_dl_video"), style=ButtonStyle.PRIMARY, callback_data=f"dl:v:{token}"),
-         InlineKeyboardButton(text=t(lang, "btn_dl_audio"), style=ButtonStyle.SUCCESS, callback_data=f"dl:a:{token}")],
-        [InlineKeyboardButton(text=t(lang, "btn_dl_shazam"), style=ButtonStyle.DANGER, callback_data=f"dl:s:{token}")],
+        [InlineKeyboardButton(text=t(lang, "btn_dl_video"), callback_data=f"dl:v:{token}"),
+         InlineKeyboardButton(text=t(lang, "btn_dl_audio"), callback_data=f"dl:a:{token}")],
+        [InlineKeyboardButton(text=t(lang, "btn_dl_shazam"), callback_data=f"dl:s:{token}")],
     ])
 
 

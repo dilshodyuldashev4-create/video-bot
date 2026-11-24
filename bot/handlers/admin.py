@@ -15,7 +15,6 @@ from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from aiogram.enums import ButtonStyle
 
 from ..config import config
 from ..db import DB
@@ -40,8 +39,8 @@ async def is_admin(db: DB, user_id: int) -> bool:
 def panel_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardButton
     return InlineKeyboardMarkup(inline_keyboard=[
-        [b(text="📊 Статистика", callback_data="adm:stats", style=ButtonStyle.PRIMARY),
-         b(text="📢 Рассылка", callback_data="adm:bc", style=ButtonStyle.SUCCESS)],
+        [b(text="📊 Статистика", callback_data="adm:stats"),
+         b(text="📢 Рассылка", callback_data="adm:bc")],
         [b(text="🔥 Топ запросов", callback_data="adm:top"),
          b(text="🩺 Диагностика", callback_data="adm:diag")],
         [b(text="👑 Админы", callback_data="adm:admins")],
@@ -195,8 +194,8 @@ async def on_broadcast_message(message: Message, db: DB, state: FSMContext) -> N
     await message.answer(
         f"👆 Так увидят сообщение пользователи. Отправить <b>{n}</b> пользователям?",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text=f"✅ Отправить ({n})", callback_data="adm:bc_go", style=ButtonStyle.SUCCESS),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="adm:home", style=ButtonStyle.DANGER),
+            InlineKeyboardButton(text=f"✅ Отправить ({n})", callback_data="adm:bc_go"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="adm:home"),
         ]]),
     )
 
