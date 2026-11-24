@@ -68,12 +68,6 @@ def video_kb(token: str, bot_username: str, lang: str) -> InlineKeyboardMarkup:
     ])
 
 
-def shazam_kb(url: str | None, lang: str) -> InlineKeyboardMarkup | None:
-    if not url:
-        return None
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t(lang, "btn_shazam"), url=url)]])
-
-
 def main_menu(lang: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[

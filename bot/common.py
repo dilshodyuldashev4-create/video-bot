@@ -100,29 +100,34 @@ async def _send_fresh(bot: Bot, db: DB, key: str, chat_id: int, lang: str, usern
     return msg
 
 
+def split_query(query: str) -> tuple[str, str]:
+    """'Artist - Title' -> (title, artist)."""
+    artist, sep, title = query.partition(" - ")
+    return (title.strip(), artist.strip()) if sep and title.strip() else (query.strip(), "")
+
+
 async def send_track(bot: Bot, db: DB, chat_id: int, video_id: str, lang: str,
                      header: str | None = None, reply_to: int | None = None, query: str = "") -> Message:
-    """Send a YouTube track as MP3. Uses the cached Telegram file_id if we've sent it before.
-    If YouTube refuses (blocked server IP etc.), the same song is taken from SoundCloud."""
+    """Send a chosen YouTube track as MP3 (cached file_id if sent before).
+    If that video can't be downloaded, the same song is taken from another upload or SoundCloud."""
     username = await bot_username(bot)
     key = f"a:{video_id}"
     if msg := await _send_cached(bot, db, key, chat_id, lang, username, header, reply_to):
         return msg
-    try:
+    if query:
+        title, artist = split_query(query)
+        audio = await downloader.download_song(title, artist, prefer_id=video_id)
+    else:
         audio = await downloader.download_audio(video_id)
-    except downloader.DownloadFailed as e:
-        if not query:
-            raise
-        log.warning("YouTube audio failed for %s, trying SoundCloud for %r: %s", video_id, query, str(e)[:200])
-        audio = await downloader.download_audio_soundcloud(query)
     return await _send_fresh(bot, db, key, chat_id, lang, username, audio, header, reply_to)
 
 
-async def send_soundcloud(bot: Bot, db: DB, chat_id: int, query: str, lang: str,
-                          header: str | None = None, reply_to: int | None = None) -> Message:
+async def send_song(bot: Bot, db: DB, chat_id: int, title: str, artist: str, lang: str,
+                    header: str | None = None, reply_to: int | None = None) -> Message:
+    """Send a song known only by name (Shazam result, chart entry) as MP3."""
     username = await bot_username(bot)
-    key = f"sc:{query.lower()}"
+    key = f"s:{artist.lower()} - {title.lower()}"[:250]
     if msg := await _send_cached(bot, db, key, chat_id, lang, username, header, reply_to):
         return msg
-    audio = await downloader.download_audio_soundcloud(query)
+    audio = await downloader.download_song(title, artist)
     return await _send_fresh(bot, db, key, chat_id, lang, username, audio, header, reply_to)

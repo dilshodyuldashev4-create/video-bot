@@ -207,19 +207,22 @@ def similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, norm(a), norm(b)).ratio()
 
 
-async def find_best(title: str, artist: str) -> Track | None:
-    """Find the YouTube upload that best matches a recognised song."""
+def _main_artist(artist: str) -> str:
+    return re.split(r",|&| feat\.? | ft\.? | x ", artist.lower())[0].strip() if artist else ""
+
+
+def rank_tracks(results: list[Track], title: str, artist: str) -> list[Track]:
+    """Best matches for a song first; results that don't mention the title at all are dropped."""
     query = f"{artist} - {title}" if artist else title
-    results = await search(query, limit=8)
-    if not results:
-        return None
+    title_words = set(re.findall(r"\w{3,}", title.lower())) or set(re.findall(r"\w+", title.lower()))
+    main = _main_artist(artist)
 
     def score(tr: Track) -> float:
-        s = similarity(query, _JUNK.sub("", tr.title))
         low = tr.title.lower()
+        s = similarity(query, _JUNK.sub("", tr.title))
         if title.lower() in low:
             s += 0.3
-        if artist and artist.split(",")[0].split("&")[0].strip().lower() in (low + " " + tr.uploader.lower()):
+        if main and main in (low + " " + tr.uploader.lower()):
             s += 0.3
         if any(w in low for w in ("cover", "remix", "slowed", "speed up", "sped up", "karaoke", "1 hour", "nightcore")) \
                 and not any(w in query.lower() for w in ("cover", "remix", "slowed", "sped")):
@@ -228,7 +231,60 @@ async def find_best(title: str, artist: str) -> Track | None:
             s += 0.15
         return s
 
-    return max(results, key=score)
+    relevant = [tr for tr in results
+                if not title_words or title_words & set(re.findall(r"\w+", (tr.title + " " + tr.uploader).lower()))]
+    return sorted(relevant, key=score, reverse=True)
+
+
+async def find_best(title: str, artist: str) -> Track | None:
+    """Find the YouTube upload that best matches a recognised song."""
+    query = f"{artist} - {title}" if artist else title
+    ranked = rank_tracks(await search(query, limit=8), title, artist)
+    return ranked[0] if ranked else None
+
+
+MAX_YT_TRIES = 5
+
+
+async def download_song(title: str, artist: str = "", prefer_id: str | None = None) -> AudioFile:
+    """Get an MP3 of a song no matter what: the chosen YouTube video first, then the next best
+    YouTube matches for several spellings of the query, then SoundCloud.
+    Single videos often fail (region-locked, age-gated, removed, blocked server IP)."""
+    errors: list[str] = []
+    tried: set[str] = set()
+
+    async def attempt(video_id: str) -> AudioFile | None:
+        tried.add(video_id)
+        try:
+            return await download_audio(video_id)
+        except DownloadFailed as e:
+            errors.append(f"yt:{video_id}: {str(e)[:120]}")
+            return None
+
+    if prefer_id and (audio := await attempt(prefer_id)):
+        return audio
+
+    queries = list(dict.fromkeys(q for q in (
+        f"{artist} - {title}" if artist else "",
+        f"{title} {artist}".strip(),
+        title,
+    ) if q))
+    for q in queries[:2]:
+        for tr in rank_tracks(await search(q, limit=8), title, artist):
+            if len(tried) >= MAX_YT_TRIES:
+                break
+            if tr.id in tried:
+                continue
+            if audio := await attempt(tr.id):
+                return audio
+
+    for q in queries:
+        try:
+            return await download_audio_soundcloud(q)
+        except DownloadFailed as e:
+            errors.append(f"sc:{q}: {str(e)[:120]}")
+    log.warning("no MP3 for %r / %r: %s", artist, title, " | ".join(errors))
+    raise DownloadFailed("; ".join(errors) or "nothing found")
 
 
 # ---------------------------------------------------------------- audio
