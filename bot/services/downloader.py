@@ -219,9 +219,10 @@ async def _in_thread(fn, *args):
 
 # ---------------------------------------------------------------- search
 
-def _search_sync(query: str, limit: int) -> list[Track]:
+def _search_sync(query: str, limit: int, recent: bool = False) -> list[Track]:
     opts = _base_opts() | {"extract_flat": "in_playlist", "skip_download": True}
-    info = _extract(f"ytsearch{limit}:{query}", opts, download=False)
+    # ytsearchdate: newest uploads first (fresh hits instead of years-old popular videos)
+    info = _extract(f"ytsearch{'date' if recent else ''}{limit}:{query}", opts, download=False)
     tracks: list[Track] = []
     seen: set[str] = set()
     for e in (info or {}).get("entries") or []:
@@ -244,14 +245,15 @@ SEARCH_TTL = 15 * 60
 _search_cache: dict[tuple[str, int], tuple[float, list[Track]]] = {}
 
 
-async def search(query: str, limit: int = 30) -> list[Track]:
-    """YouTube search (results cached for 15 min: repeated and popular queries are instant)."""
-    key = (query.lower().strip(), limit)
+async def search(query: str, limit: int = 30, recent: bool = False) -> list[Track]:
+    """YouTube search (results cached for 15 min: repeated and popular queries are instant).
+    recent=True: newest uploads first."""
+    key = (query.lower().strip(), limit, recent)
     hit = _search_cache.get(key)
     if hit and time.time() - hit[0] < SEARCH_TTL:
         return list(hit[1])
     try:
-        tracks = await _in_thread(_search_sync, query, limit)
+        tracks = await _in_thread(_search_sync, query, limit, recent)
     except Exception:
         log.exception("search failed: %s", query)
         return []
