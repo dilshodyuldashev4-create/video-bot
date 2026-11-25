@@ -383,14 +383,39 @@ async def test_chart_falls_back_to_youtube(monkeypatch):
     async def broken(kind):
         raise RuntimeError("Country not found, check the country code: UZ")
 
-    async def yt(q, limit=30):
-        assert "uzbek" in q
+    async def yt(q, limit=30, recent=False):
+        assert "o'zbek" in q and recent  # newest uploads, not years-old popular videos
         return [downloader.Track(id="a1", title="Shahzoda - Hayot (Official Video)", duration=200)]
 
+    monkeypatch.setattr(charts, "_apple_chart", broken)
     monkeypatch.setattr(charts, "_shazam_chart", broken)
     monkeypatch.setattr(downloader, "search", yt)
     items = await charts.get_chart("uz")
     assert items == [{"id": "a1", "title": "Shahzoda - Hayot", "duration": 200}]
+
+
+async def test_chart_prefers_fresh_apple_chart(monkeypatch):
+    from bot.services import charts
+    charts._cache.clear()
+    apple = {"feed": {"results": [{"artistName": f"Artist {i}", "name": f"Song {i}",
+                                   "artworkUrl100": f"https://is1.mzstatic.com/{i}/100x100bb.jpg"} for i in range(20)]}}
+    asked = []
+
+    def fake_get(url, referer="", timeout=20, **kw):
+        asked.append(url)
+        return json.dumps(apple).encode()
+
+    async def no_shazam(kind):
+        raise AssertionError("Apple answered, Shazam is not needed")
+
+    monkeypatch.setattr(charts, "http_get", fake_get)
+    monkeypatch.setattr(charts, "_shazam_chart", no_shazam)
+    items = await charts.get_chart("ru")
+    assert "/ru/music/most-played/" in asked[0]
+    assert items[0] == {"id": "q:Artist 0 - Song 0", "title": "Artist 0 - Song 0", "duration": 0,
+                        "cover": "https://is1.mzstatic.com/0/300x300bb.jpg"}
+    deezer = {"data": [{"title": "Hit", "artist": {"name": "Star"}, "album": {"cover_medium": "C"}}]}
+    assert charts.parse_deezer(deezer) == [{"id": "q:Star - Hit", "title": "Star - Hit", "duration": 0, "cover": "C"}]
 
 
 async def test_speed_up_and_slowed(env, monkeypatch, http_base, data_dir):
@@ -1166,6 +1191,15 @@ async def test_mini_app_api(env, monkeypatch, stereo_mp3):
         body = await full.read()
         part = await client.get(r["url"], headers={"Range": "bytes=0-99"})
         assert part.status == 206 and await part.read() == body[:100]
+        from bot.services import charts
+
+        async def fake_chart(kind):
+            return [{"id": "q:Star - Hit", "title": "Star - Hit", "duration": 0, "cover": "C"}]
+
+        monkeypatch.setattr(charts, "get_chart", fake_chart)
+        chart = await (await client.get("/api/chart?kind=uz", headers=h)).json()
+        assert chart["items"][0]["cover"] == "C"
+        assert (await client.get("/api/chart?kind=mars", headers=h)).status == 404
         page = await client.get("/")
         assert page.status == 200 and "telegram-web-app.js" in await page.text()
     finally:

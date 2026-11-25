@@ -24,7 +24,7 @@ from aiohttp import web
 from ..common import send_song, send_track, split_query
 from ..config import config
 from ..db import DB
-from ..services import downloader
+from ..services import charts, downloader
 from ..services.mp3sites import http_get
 from ..texts import t
 
@@ -92,6 +92,18 @@ class Api:
                         "duration": tr.duration} for tr in tracks]
         return web.json_response({"items": items})
 
+    async def chart(self, request: web.Request) -> web.Response:
+        """Fresh charts for the home screen: ?kind=world|uz|ru."""
+        self.user(request)
+        kind = request.query.get("kind", "world")
+        if kind not in charts.KINDS:
+            raise web.HTTPNotFound()
+        try:
+            items = await asyncio.wait_for(charts.get_chart(kind), 60)
+        except asyncio.TimeoutError:
+            items = []
+        return web.json_response({"items": items[:50]})
+
     async def playlist(self, request: web.Request) -> web.Response:
         self.user(request)
         pl = await self.db.get_playlist(code=request.match_info["code"])
@@ -154,6 +166,7 @@ def make_app(bot: Bot, db: DB) -> web.Application:
     app.router.add_get("/api/me", api.me)
     app.router.add_get("/api/search", api.search)
     app.router.add_get("/api/playlist/{code}", api.playlist)
+    app.router.add_get("/api/chart", api.chart)
     app.router.add_post("/api/play", api.play)
     app.router.add_get("/api/stream", api.stream)
     app["api"] = api
