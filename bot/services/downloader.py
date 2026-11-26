@@ -274,6 +274,26 @@ async def search(query: str, limit: int = 30, recent: bool = False) -> list[Trac
     return tracks
 
 
+def youtube_title_sync(video_id: str) -> str:
+    """'Artist - Title' of a YouTube video from the public oEmbed endpoint. It answers even
+    while YouTube asks this server to "sign in to confirm you're not a bot"."""
+    import json as _json
+    url = f"https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v={video_id}"
+    data = _json.loads(mp3sites.http_get(url, timeout=10))
+    title, author = (data.get("title") or "").strip(), (data.get("author_name") or "").strip()
+    performer, name = split_title({"title": title, "uploader": author})
+    name = clean_title(name) or name
+    return f"{performer} - {name}" if performer and name else name
+
+
+async def youtube_title(video_id: str) -> str:
+    try:
+        return await _in_thread(youtube_title_sync, video_id)
+    except Exception as e:  # noqa: BLE001
+        log.info("oembed %s failed: %s", video_id, str(e)[:120])
+        return ""
+
+
 def clean_title(title: str) -> str:
     """'POP SMOKE - DIOR (OFFICIAL VIDEO) #hashtag' -> 'POP SMOKE - DIOR'"""
     title = _JUNK.sub("", title)

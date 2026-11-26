@@ -720,6 +720,34 @@ async def test_youtube_link_blocked_uses_invidious(env, monkeypatch, media_dir):
     assert not any("Не получилось" in (m.text or "") for m in session.of(SendMessage))
 
 
+async def test_blocked_youtube_video_link_sends_the_song(env, monkeypatch, stereo_mp3):
+    session, _, send_text, press, _ = env
+
+    async def no_video(url, platform):
+        raise downloader.DownloadFailed("Sign in to confirm you're not a bot")
+
+    asked = []
+
+    async def song(title, artist="", prefer_id=None):
+        asked.append((artist, title, prefer_id))
+        out = downloader._new_workdir() / "a.mp3"
+        shutil.copy(stereo_mp3, out)
+        return downloader.AudioFile(path=out, title=title, performer=artist, duration=30)
+
+    async def oembed(video_id):
+        return "Pop Smoke - Dior"
+
+    monkeypatch.setattr(downloader, "download_video", no_video)
+    monkeypatch.setattr(downloader, "download_song", song)
+    monkeypatch.setattr(downloader, "youtube_title", oembed)
+    await send_text("https://youtu.be/Uk9u4ikJY0U")
+    await press(_choice_buttons(session)[0])  # 🎬 video
+    assert asked == [("Pop Smoke", "Dior", "Uk9u4ikJY0U")]
+    assert session.of(SendAudio), "the song must still arrive"
+    texts = [m.text or "" for m in session.of(SendMessage)]
+    assert any("Присылаю песню" in x for x in texts) and not any("Не получилось" in x for x in texts)
+
+
 async def test_admin_uploads_youtube_cookies(env, monkeypatch, data_dir):
     session, db, _, _, send_media = env
     from aiogram.types import Document
