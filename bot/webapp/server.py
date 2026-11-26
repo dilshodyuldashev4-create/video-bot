@@ -24,7 +24,7 @@ from aiohttp import web
 from ..common import send_song, send_track, split_query
 from ..config import config
 from ..db import DB
-from ..services import charts, downloader, lyrics
+from ..services import charts, downloader, lyrics, wave
 from ..services.mp3sites import http_get
 from ..texts import t
 
@@ -141,6 +141,34 @@ class Api:
             return web.json_response({"error": t(lang, "error")}, status=500)
         return web.json_response({"url": stream_url(msg.audio.file_id), "fid": msg.audio.file_id, "sent": True})
 
+    async def event(self, request: web.Request) -> web.Response:
+        """What the user does in the player: play / finish / skip. Feeds the personal stream."""
+        uid, _ = self.user(request)
+        body = await request.json()
+        kind = str(body.get("kind") or "")
+        title = " ".join(str(body.get("title") or "").split())[:250]
+        if kind not in ("play", "finish", "skip") or not title:
+            raise web.HTTPBadRequest()
+        artist, _, name = title.partition(" - ")
+        if not name:
+            artist, name = "", artist
+        await self.db.add_listen(uid, artist, name, kind)
+        return web.json_response({"ok": True})
+
+    async def wave(self, request: web.Request) -> web.Response:
+        """🌊 The personal endless stream (?genre=<key> for a genre stream), built from what the user plays."""
+        uid, _ = self.user(request)
+        genre = request.query.get("genre") or None
+        if genre and genre not in wave.GENRES:
+            raise web.HTTPNotFound()
+        taste = await self.db.taste(uid)
+        likes = await self.db.get_likes(uid)
+        try:
+            data = await asyncio.wait_for(wave.build(taste, likes, genre), 60)
+        except asyncio.TimeoutError:
+            data = {"items": [], "seeds": []}
+        return web.json_response(data)
+
     async def like(self, request: web.Request) -> web.Response:
         """❤️ from the player: toggles a like on a track the user already has (fid:<file_id>)."""
         uid, _ = self.user(request)
@@ -222,6 +250,8 @@ def make_app(bot: Bot, db: DB) -> web.Application:
     app.router.add_post("/api/play", api.play)
     app.router.add_get("/api/stream", api.stream)
     app.router.add_post("/api/like", api.like)
+    app.router.add_post("/api/event", api.event)
+    app.router.add_get("/api/wave", api.wave)
     app.router.add_get("/api/lyrics", api.song_lyrics)
     app.router.add_get("/api/cover", api.cover)
     app["api"] = api

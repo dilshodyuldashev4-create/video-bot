@@ -384,14 +384,45 @@ async def test_chart_falls_back_to_youtube(monkeypatch):
         raise RuntimeError("Country not found, check the country code: UZ")
 
     async def yt(q, limit=30, recent=False):
-        assert "o'zbek" in q and recent  # newest uploads, not years-old popular videos
-        return [downloader.Track(id="a1", title="Shahzoda - Hayot (Official Video)", duration=200)]
+        assert "new music" in q and recent  # newest uploads, not years-old popular videos
+        return [downloader.Track(id="a1", title="Artist - Hit (Official Video)", duration=200)]
 
     monkeypatch.setattr(charts, "_apple_chart", broken)
     monkeypatch.setattr(charts, "_shazam_chart", broken)
+    monkeypatch.setattr(charts, "_deezer_chart", broken)
     monkeypatch.setattr(downloader, "search", yt)
-    items = await charts.get_chart("uz")
-    assert items == [{"id": "a1", "title": "Shahzoda - Hayot", "duration": 200}]
+    items = await charts.get_chart("world")
+    assert items == [{"id": "a1", "title": "Artist - Hit", "duration": 200}]
+
+
+async def test_uzbek_chart_has_only_uzbek_songs(monkeypatch):
+    from bot.services import charts
+    charts._cache.clear()
+
+    async def apple(kind):
+        assert kind == "uz"
+        return [charts._item(a, t) for a, t in [("MATRANG", "Но забудь"), ("BLOK3", "Sebebi Yar"),
+                                                 ("BLOK3 & Poizi", "Çok Güzel Gülüyorsun"), ("Shahzoda", "Yor"),
+                                                 ("Miyagi & Эндшпиль", "I Got Love")]]
+
+    async def shazam(kind):
+        return [charts._item("Konsta", "Sevgi"), charts._item("NAVAI", "Больше, чем ближе")]
+
+    asked = []
+
+    async def yt(q, limit=30, recent=False):
+        asked.append(q)
+        return [downloader.Track(id=f"v{len(asked)}a", title="Jaloliddin Ahmadov - Qo'shnim (Official Video)", duration=210),
+                downloader.Track(id=f"v{len(asked)}b", title="TOP 50 O'zbek qo'shiqlar 2026 MIX", duration=3600),
+                downloader.Track(id=f"v{len(asked)}c", title="Shahzoda - Yor (Official Video)", duration=200),
+                downloader.Track(id=f"v{len(asked)}d", title="Jony - Комета", duration=180)]
+
+    monkeypatch.setattr(charts, "_apple_chart", apple)
+    monkeypatch.setattr(charts, "_shazam_chart", shazam)
+    monkeypatch.setattr(downloader, "search", yt)
+    titles = [it["title"] for it in await charts.get_chart("uz")]
+    assert titles == ["Shahzoda - Yor", "Konsta - Sevgi", "Jaloliddin Ahmadov - Qo'shnim"]
+    assert asked and all("o'zbek" in q or "uzbek" in q for q in asked)
 
 
 async def test_chart_prefers_fresh_apple_chart(monkeypatch):
@@ -1237,6 +1268,54 @@ async def test_mini_app_like_lyrics_cover(env, monkeypatch):
         assert ok.status == 200 and await ok.read() == b"JPEG"
         assert (await client.get("/api/cover?u=https://evil.example/x.jpg")).status == 403
         assert (await client.get("/api/cover?u=https://a.mzstatic.com.evil.example/x")).status == 403
+    finally:
+        await client.close()
+
+
+async def test_personal_stream_learns_from_listens(env, monkeypatch):
+    from aiohttp.test_utils import TestClient, TestServer
+    from bot.config import config
+    from bot.services import charts, wave
+    from bot.webapp import server
+    session, db, _, _, _ = env
+    monkeypatch.setattr(config, "bot_token", "1:test")
+    wave._cache.clear()
+    radio_for = []
+
+    async def radio(name):
+        radio_for.append(name)
+        return [charts._item(f"{name} Friend {i}", f"Song {i}") for i in range(6)]
+
+    async def chart(kind):
+        return [charts._item("Chart Star", "Hit"), charts._item("Skipper", "Bad Song")]
+
+    async def genre(key):
+        assert key == "hiphop"
+        return [charts._item("Konsta", "Rap"), charts._item("Other", "Track")]
+
+    monkeypatch.setattr(wave, "artist_radio", radio)
+    monkeypatch.setattr(charts, "get_chart", chart)
+    monkeypatch.setattr(wave, "genre_tracks", genre)
+    client = TestClient(TestServer(server.make_app(session.bot, db)))
+    await client.start_server()
+    try:
+        h = {"X-Init-Data": _init_data("1:test")}
+        for title, kind in [("Shahzoda - Yor", "finish"), ("Shahzoda - Yor", "finish"), ("Konsta - Sevgi", "play"),
+                            ("Skipper - Bad Song", "skip")]:
+            assert (await client.post("/api/event", headers=h, json={"kind": kind, "title": title})).status == 200
+        assert (await client.post("/api/event", headers=h, json={"kind": "hack", "title": "x"})).status == 400
+        taste = await db.taste(USER.id)
+        assert [a for a, _ in taste["artists"]] == ["Shahzoda", "Konsta"]
+        r = await (await client.get("/api/wave", headers=h)).json()
+        titles = [it["title"] for it in r["items"]]
+        assert r["seeds"] == ["Shahzoda", "Konsta"] and radio_for == ["Shahzoda", "Konsta"]
+        assert "Skipper - Bad Song" not in titles and "Chart Star - Hit" in titles
+        assert any(t.startswith("Shahzoda Friend") for t in titles)
+        artists = [t.partition(" - ")[0] for t in titles]
+        assert all(a != b for a, b in zip(artists, artists[1:]))  # never the same artist twice in a row
+        g = await (await client.get("/api/wave?genre=hiphop", headers=h)).json()
+        assert g["seeds"] == ["Konsta"] and "Other - Track" in [it["title"] for it in g["items"]]
+        assert (await client.get("/api/wave?genre=polka", headers=h)).status == 404
     finally:
         await client.close()
 
