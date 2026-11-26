@@ -72,7 +72,7 @@ YouTube, Instagram и TikTok часто блокируют IP дата-цент�
 - **Invidious / Piped**: если и cobalt не помог, видео и аудио скачиваются через публичные серверы Invidious/Piped (список берётся автоматически; свои можно указать в `YT_ALT_INSTANCES`, например `https://inv.example.com,piped:https://pipedapi.example.com`).
 - **MP3-каталог (hitmotop)** и **SoundCloud** как запасные источники MP3 (зеркало каталога можно задать в `HITMO_URL`).
 
-Команда **`/diag`** в Telegram показывает, что работает с сервера: YouTube, SoundCloud, TikTok напрямую и через прокси, MP3-каталог и Invidious/Piped (если задан `ADMIN_IDS`, команда доступна только админам).
+Команда **`/diag`** в Telegram показывает, что работает с сервера: YouTube, SoundCloud, TikTok напрямую и через прокси, MP3-каталог и Invidious/Piped (если задан `ADMIN_IDS`, команда доступна только админам). Внизу он показывает последние треки, которые не скачались, и причину от каждого источника. yt-dlp обновляется сам: при каждом запуске контейнера и раз в сутки (выключить: `YTDLP_AUTO_UPDATE=0`).
 
 ### Если YouTube всё равно блокирует сервер
 

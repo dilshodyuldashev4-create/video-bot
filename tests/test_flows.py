@@ -1320,6 +1320,24 @@ async def test_personal_stream_learns_from_listens(env, monkeypatch):
         await client.close()
 
 
+async def test_failed_song_is_remembered_for_diag(monkeypatch):
+    async def fail(*a, **k):
+        raise downloader.DownloadFailed("HTTP Error 403")
+
+    async def nothing(q, limit=8, recent=False):
+        return []
+
+    monkeypatch.setattr(downloader, "download_from_sites", fail)
+    monkeypatch.setattr(downloader, "download_audio_soundcloud", fail)
+    monkeypatch.setattr(downloader, "search", nothing)
+    downloader.RECENT_FAILURES.clear()
+    with pytest.raises(downloader.DownloadFailed):
+        await downloader.download_song("Dior", "Pop Smoke")
+    assert downloader.active_downloads() == 0
+    name, why = downloader.RECENT_FAILURES[-1][1:]
+    assert name == "Pop Smoke - Dior" and "sites: HTTP Error 403" in why and "sc:" in why
+
+
 def test_parse_lrc():
     from bot.services import lyrics
     assert lyrics.parse_lrc("[00:01.50] a\n[00:03.00][01:00.00] b\nno stamp") == [[1.5, "a"], [3.0, "b"], [60.0, "b"]]

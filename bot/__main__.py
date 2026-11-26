@@ -14,7 +14,7 @@ from .config import config
 from .db import DB
 from .handlers import admin, inline, library, links, music, recognize, search, start, tools
 from .middlewares import LangMiddleware
-from .services import downloader
+from .services import downloader, updater
 from .utils import cleanup_old
 
 log = logging.getLogger("bot")
@@ -76,8 +76,10 @@ async def main() -> None:
     ])
     from .webapp import server as webapp
     tasks = [asyncio.create_task(housekeeping(db)), asyncio.create_task(music.release_watcher(bot, db)),
-             asyncio.create_task(webapp.run(bot, db))]
+             asyncio.create_task(webapp.run(bot, db)),
+             asyncio.create_task(updater.run(lambda: downloader.active_downloads() > 0))]
     me = await bot.me()
+    log.info("yt-dlp %s", updater.installed())
     log.info("Started @%s (local API: %s, upload limit %d MB)", me.username, config.local_api,
              config.upload_limit // 2**20)
     try:
