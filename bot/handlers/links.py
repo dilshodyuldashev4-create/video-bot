@@ -115,6 +115,14 @@ async def run_link(message: Message, bot: Bot, db: DB, lang: str, user_id: int, 
             await message.answer(t(lang, "too_big"))
         except downloader.DownloadFailed:
             log.warning("download failed (%s): %s", mode, url, exc_info=True)
+            if mode == "v" and platform == "youtube":
+                # YouTube refuses the video to this server: the song from it still comes from other sources
+                try:
+                    await message.answer(t(lang, "yt_video_blocked"))
+                    await send_link_audio(bot, db, message.chat.id, lang, url, platform)
+                    return True
+                except Exception:  # noqa: BLE001
+                    log.warning("audio fallback failed too: %s", url, exc_info=True)
             await message.answer(t(lang, "dl_failed"))
         except Exception:
             log.exception("link handler failed: %s", url)
@@ -131,7 +139,9 @@ async def send_link_audio(bot: Bot, db: DB, chat_id: int, lang: str, url: str, p
     """🎵 Audio of the linked video as MP3 (cached by link)."""
     key = canonical_key(url, platform)
     if key.startswith("youtube:"):
-        return await send_track(bot, db, chat_id, key.split(":", 1)[1], lang)
+        vid = key.split(":", 1)[1]
+        # the title lets the song come from MP3 sites / SoundCloud when YouTube blocks the server
+        return await send_track(bot, db, chat_id, vid, lang, query=await downloader.youtube_title(vid))
     username = await bot_username(bot)
     akey = "la:" + key
     if msg := await send_cached_audio(bot, db, akey, chat_id, lang, username, None, None):
