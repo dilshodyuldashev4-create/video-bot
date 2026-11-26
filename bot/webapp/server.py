@@ -24,13 +24,15 @@ from aiohttp import web
 from ..common import send_song, send_track, split_query
 from ..config import config
 from ..db import DB
-from ..services import charts, downloader
+from ..services import charts, downloader, lyrics
 from ..services.mp3sites import http_get
 from ..texts import t
 
 log = logging.getLogger(__name__)
 
 HERE = Path(__file__).parent
+# cover art the page may read pixels from (for colours) through /api/cover
+COVER_HOSTS = ("i.ytimg.com", ".mzstatic.com", ".dzcdn.net")
 STREAM_TTL = 6 * 3600
 _state: dict = {"url": ""}
 
@@ -120,10 +122,10 @@ class Api:
         title = str(body.get("title") or "")
         lang = await self.lang_of(uid, tg_lang)
         if tid.startswith("fid:"):
-            return web.json_response({"url": stream_url(tid[4:])})
+            return web.json_response({"url": stream_url(tid[4:]), "fid": tid[4:]})
         cached = await self.db.get_file(f"a:{tid}") if not tid.startswith("q:") else None
         if cached:
-            return web.json_response({"url": stream_url(cached[1])})
+            return web.json_response({"url": stream_url(cached[1]), "fid": cached[1]})
         try:
             if tid.startswith("q:"):
                 name, artist = split_query(tid[2:])
@@ -137,7 +139,57 @@ class Api:
             return web.json_response({"error": t(lang, "error")}, status=500)
         if not msg.audio:
             return web.json_response({"error": t(lang, "error")}, status=500)
-        return web.json_response({"url": stream_url(msg.audio.file_id), "sent": True})
+        return web.json_response({"url": stream_url(msg.audio.file_id), "fid": msg.audio.file_id, "sent": True})
+
+    async def like(self, request: web.Request) -> web.Response:
+        """❤️ from the player: toggles a like on a track the user already has (fid:<file_id>)."""
+        uid, _ = self.user(request)
+        body = await request.json()
+        fid = str(body.get("id") or "").removeprefix("fid:")
+        if not fid:
+            raise web.HTTPBadRequest()
+        if await self.db.unlike_file(uid, fid):
+            return web.json_response({"liked": False})
+        try:
+            unique = (await self.bot.get_file(fid)).file_unique_id
+        except Exception:  # noqa: BLE001  (big files can't be fetched by getFile; the file id still works)
+            unique = fid
+        await self.db.toggle_like(uid, unique, fid, str(body.get("title") or "♪")[:200], int(body.get("duration") or 0))
+        return web.json_response({"liked": True})
+
+    async def song_lyrics(self, request: web.Request) -> web.Response:
+        """Lyrics for the player: time-stamped lines when LRCLIB has them, plain text otherwise."""
+        self.user(request)
+        name = " ".join((request.query.get("title") or "").split())[:200]
+        if not name:
+            return web.json_response({"synced": None, "text": None})
+        key = "lyw:" + name.lower()
+        cached = await self.db.get_file(key)
+        if cached:
+            return web.json_response(cached[2])
+        performer, _, title = name.partition(" - ")
+        if not title:
+            performer, title = "", performer
+        title = downloader.clean_title(title) or title
+        synced = await asyncio.to_thread(lyrics.find_synced, title, performer)
+        text = None if synced else await asyncio.to_thread(lyrics.find, title, performer)
+        data = {"synced": synced, "text": text}
+        if synced or text:
+            await self.db.put_file(key, "lyrics", "-", data)
+        return web.json_response(data)
+
+    async def cover(self, request: web.Request) -> web.Response:
+        """Same-origin copy of a cover so the page can pick its colours (canvas needs CORS)."""
+        url = request.query.get("u", "")
+        host = url.split("/")[2] if url.startswith("https://") and url.count("/") >= 3 else ""
+        if not host or not any(host == h or (h.startswith(".") and host.endswith(h)) for h in COVER_HOSTS):
+            raise web.HTTPForbidden()
+        try:
+            data = await asyncio.to_thread(http_get, url, timeout=10)
+        except Exception:  # noqa: BLE001
+            raise web.HTTPNotFound()
+        return web.Response(body=data[:2_000_000], content_type="image/jpeg",
+                            headers={"Cache-Control": "public, max-age=604800"})
 
     async def stream(self, request: web.Request) -> web.StreamResponse:
         fid, sig = request.query.get("f", ""), request.query.get("s", "")
@@ -169,6 +221,9 @@ def make_app(bot: Bot, db: DB) -> web.Application:
     app.router.add_get("/api/chart", api.chart)
     app.router.add_post("/api/play", api.play)
     app.router.add_get("/api/stream", api.stream)
+    app.router.add_post("/api/like", api.like)
+    app.router.add_get("/api/lyrics", api.song_lyrics)
+    app.router.add_get("/api/cover", api.cover)
     app["api"] = api
     return app
 

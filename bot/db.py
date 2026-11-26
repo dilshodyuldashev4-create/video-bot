@@ -258,6 +258,11 @@ class DB:
         await self.conn.commit()
         return True
 
+    async def unlike_file(self, user_id: int, file_id: str) -> bool:
+        cur = await self.conn.execute("DELETE FROM likes WHERE user_id=? AND file_id=?", (user_id, file_id))
+        await self.conn.commit()
+        return bool(cur.rowcount)
+
     async def is_liked(self, user_id: int, unique_id: str) -> bool:
         async with self.conn.execute(
             "SELECT 1 FROM likes WHERE user_id=? AND unique_id=?", (user_id, unique_id)

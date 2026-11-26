@@ -17,6 +17,8 @@
     --acc-text: #141414;
     --safe-b: env(safe-area-inset-bottom);
     --tab-h: 58px;
+    --dyn: 255 216 61;          /* colour of the current cover, set from JS */
+    --glow: 0;                  /* 0..1 loudness, set from JS every frame */
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); overscroll-behavior: none;
@@ -26,6 +28,12 @@
   .page { padding: 8px 16px calc(var(--tab-h) + 86px + var(--safe-b)); max-width: 600px; margin: 0 auto; display: none; }
   .page.on { display: block; animation: fade .25s ease both; }
   @keyframes fade { from { opacity: 0; transform: translateY(6px); } }
+  .page.on .row { animation: rise .4s cubic-bezier(.2,.9,.3,1) both; }
+  .page.on .row:nth-child(2) { animation-delay: .03s; } .page.on .row:nth-child(3) { animation-delay: .06s; }
+  .page.on .row:nth-child(4) { animation-delay: .09s; } .page.on .row:nth-child(5) { animation-delay: .12s; }
+  .page.on .row:nth-child(6) { animation-delay: .15s; } .page.on .row:nth-child(n+7) { animation-delay: .18s; }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+  body.norise .page.on .row { animation: none; }
 
   .top { display: flex; align-items: center; justify-content: space-between; padding: 10px 0 4px; }
   .hello { color: var(--hint); font-size: 13px; }
@@ -58,17 +66,17 @@
   .row { display: flex; align-items: center; gap: 12px; padding: 7px 0; border-radius: 10px; transition: background .15s; }
   .row:active { background: var(--bg1); }
   .rank { width: 22px; flex: none; text-align: center; font-weight: 800; color: var(--hint); font-variant-numeric: tabular-nums; }
-  .row.playing .rank { color: var(--acc); }
+  .row.playing .rank { color: rgb(var(--dyn)); }
   .cv { position: relative; flex: none; width: 48px; height: 48px; border-radius: 8px; overflow: hidden;
     display: grid; place-items: center; font-weight: 800; color: rgba(255,255,255,.9); font-size: 18px; background: var(--bg2); }
   .cv img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .row .t { flex: 1; min-width: 0; }
   .row .t b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .row .t span { display: block; color: var(--hint); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .row.playing .t b { color: var(--acc); }
+  .row.playing .t b { color: rgb(var(--dyn)); }
   .dur { color: var(--hint); font-size: 13px; font-variant-numeric: tabular-nums; }
   .eq { display: flex; gap: 2px; align-items: flex-end; height: 14px; }
-  .eq i { width: 3px; background: var(--acc); border-radius: 1px; animation: eq .9s ease-in-out infinite; }
+  .eq i { width: 3px; background: rgb(var(--dyn)); border-radius: 1px; animation: eq .9s ease-in-out infinite; }
   .eq i:nth-child(2) { animation-delay: -.3s; } .eq i:nth-child(3) { animation-delay: -.6s; }
   .paused .eq i { animation-play-state: paused; }
   @keyframes eq { 0%,100% { height: 3px; } 50% { height: 14px; } }
@@ -124,7 +132,7 @@
   .tabbar svg { width: 24px; height: 24px; fill: currentColor; }
   .tabbar button.on { color: var(--text); }
   .mini { position: fixed; z-index: 11; left: 8px; right: 8px; bottom: calc(var(--tab-h) + var(--safe-b) + 6px); height: 60px;
-    border-radius: 14px; background: var(--bg2); display: flex; align-items: center; gap: 10px; padding: 0 6px 0 6px;
+    border-radius: 14px; background: linear-gradient(90deg, rgb(var(--dyn) / .28), rgb(var(--dyn) / .12)), var(--bg2); display: flex; align-items: center; gap: 10px; padding: 0 6px 0 6px;
     transform: translateY(calc(100% + 80px)); transition: transform .35s cubic-bezier(.3,1.2,.5,1); overflow: hidden;
     max-width: 588px; margin: 0 auto; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
   .mini.show { transform: none; }
@@ -132,7 +140,8 @@
   .mini .t { flex: 1; min-width: 0; }
   .mini .t b { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mini .t span { display: block; font-size: 12px; color: var(--hint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .mini .prog { position: absolute; left: 0; bottom: 0; height: 2px; width: 0; background: var(--acc); }
+  .mini .prog { position: absolute; left: 0; bottom: 0; height: 2px; width: 0; background: rgb(var(--dyn)); box-shadow: 0 0 8px rgb(var(--dyn)); }
+  .mini, .full .backdrop, .fill, .knob, .ctrl .pp { transition-property: transform, background, box-shadow, color; }
   .ib { width: 42px; height: 42px; display: grid; place-items: center; flex: none; border-radius: 50%; }
   .ib svg { width: 24px; height: 24px; fill: currentColor; }
 
@@ -140,15 +149,18 @@
   .full { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; padding: 10px 22px calc(26px + var(--safe-b));
     transform: translateY(105%); transition: transform .4s cubic-bezier(.2,1,.3,1); background: var(--bg); overflow: hidden; }
   .full.show { transform: none; }
-  .full .backdrop { position: absolute; inset: -20%; z-index: 0; filter: blur(60px) saturate(140%); opacity: .55; transition: background 1s; }
-  .full .backdrop::after { content: ""; position: absolute; inset: 0; background: linear-gradient(transparent, var(--bg) 75%); }
+  .full::before { content: ""; position: absolute; inset: 0; z-index: 0; transition: background 1.2s;
+    background: radial-gradient(120% 70% at 50% 20%, rgb(var(--dyn) / .55), transparent 70%), var(--bg); }
+  .full .backdrop { position: absolute; inset: -20%; z-index: 0; filter: blur(70px) saturate(160%); opacity: .45; transition: background 1s; }
+  .full .backdrop::after { content: ""; position: absolute; inset: 0; background: linear-gradient(transparent 30%, var(--bg) 85%); }
   .full > *:not(.backdrop) { position: relative; z-index: 1; }
   .full .bar { display: flex; align-items: center; justify-content: space-between; }
   .full .bar span { font-size: 13px; color: rgba(255,255,255,.7); font-weight: 600; text-align: center; flex: 1;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .art { flex: 1; display: grid; place-items: center; min-height: 0; padding: 18px 0; }
   .art .cv { width: min(86vw, 52vh, 420px); height: auto; aspect-ratio: 1; border-radius: 14px; font-size: 90px;
-    box-shadow: 0 24px 70px rgba(0,0,0,.6); transition: transform .45s cubic-bezier(.3,1.3,.5,1); }
+    box-shadow: 0 24px 70px rgba(0,0,0,.6), 0 0 calc(20px + var(--glow) * 90px) calc(var(--glow) * 18px) rgb(var(--dyn) / calc(.25 + var(--glow) * .5));
+    transition: transform .45s cubic-bezier(.3,1.3,.5,1); }
   .paused .art .cv { transform: scale(.86); }
   .info { display: flex; align-items: center; gap: 12px; }
   .info .t { flex: 1; min-width: 0; }
@@ -156,7 +168,7 @@
   .info span { color: var(--hint); font-size: 16px; }
   .seek { margin-top: 18px; padding: 8px 0; touch-action: none; }
   .track { position: relative; height: 4px; border-radius: 2px; background: rgba(255,255,255,.18); }
-  .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 2px; background: #fff; }
+  .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 2px; background: linear-gradient(90deg, rgb(var(--dyn) / .7), #fff); }
   .knob { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: #fff; left: 0; }
   .times { display: flex; justify-content: space-between; margin-top: 6px; font-size: 12px; color: var(--hint); font-variant-numeric: tabular-nums; }
   .ctrl { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
@@ -164,7 +176,42 @@
   .ctrl .ib svg { width: 30px; height: 30px; }
   .ctrl .pp { width: 72px; height: 72px; background: #fff; color: #111; }
   .ctrl .pp svg { width: 34px; height: 34px; }
-  .tg { color: var(--hint); } .tg.on { color: var(--acc); }
+  .tg { color: var(--hint); } .tg.on { color: rgb(var(--dyn)); }
+  .ctrl .pp { box-shadow: 0 8px 30px rgb(var(--dyn) / .45); }
+
+  /* action row: like, lyrics, sleep timer, queue */
+  .acts { display: flex; justify-content: space-around; margin-top: 14px; }
+  .acts .ib { width: 46px; height: 46px; color: rgba(255,255,255,.7); position: relative; transition: color .2s, transform .15s; }
+  .acts .ib:active { transform: scale(.88); }
+  .acts .ib svg { width: 24px; height: 24px; }
+  .acts .ib.on { color: rgb(var(--dyn)); }
+  .acts .ib[disabled] { opacity: .3; }
+  .acts .ib small { position: absolute; right: 2px; top: 4px; font-size: 10px; font-weight: 800; color: rgb(var(--dyn)); }
+  #like.on { color: #ff4f6d; animation: pop .35s cubic-bezier(.3,1.6,.5,1); }
+  @keyframes pop { 50% { transform: scale(1.35); } }
+
+  /* lyrics: lines light up with the song, tap one to jump there */
+  .art { position: relative; }
+  .lyr { position: absolute; inset: 0; overflow-y: auto; scrollbar-width: none; display: none; padding: 30% 4px 45%;
+    -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 75%, transparent); mask-image: linear-gradient(transparent, #000 18%, #000 75%, transparent); }
+  .lyr::-webkit-scrollbar { display: none; }
+  .lyrics .lyr { display: block; animation: fade .3s ease both; }
+  .lyrics .art .cv { opacity: 0; transform: scale(.7); pointer-events: none; }
+  .lyr p { margin: 0; padding: 7px 0; font-size: 24px; font-weight: 800; line-height: 1.25; letter-spacing: -.3px;
+    color: rgba(255,255,255,.28); transition: color .35s, transform .35s, filter .35s; transform-origin: left center; filter: blur(.4px); }
+  .lyr p.on { color: #fff; transform: scale(1.04); filter: none; text-shadow: 0 0 24px rgb(var(--dyn) / .6); }
+  .lyr p.past { color: rgba(255,255,255,.5); filter: none; }
+  .lyr.plain p { font-size: 18px; font-weight: 600; color: rgba(255,255,255,.85); filter: none; padding: 2px 0; }
+  .lyr .note { color: var(--hint); text-align: center; font-size: 15px; padding-top: 30%; }
+
+  /* bottom sheet: what plays next */
+  .full .sheet { position: absolute; z-index: 5 !important; left: 0; right: 0; bottom: 0; max-height: 72%; display: flex; flex-direction: column;
+    background: rgba(24,24,24,.96); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-radius: 20px 20px 0 0;
+    padding: 8px 16px calc(16px + var(--safe-b)); transform: translateY(105%); transition: transform .35s cubic-bezier(.2,1,.3,1); }
+  .sheet.show { transform: none; }
+  .sheet .grip { width: 38px; height: 5px; border-radius: 3px; background: #444; margin: 2px auto 10px; }
+  .sheet h3 { margin: 0 0 6px; font-size: 18px; font-weight: 800; }
+  .sheet .list { overflow-y: auto; }
 
   .toast { position: fixed; z-index: 30; left: 16px; right: 16px; top: 12px; padding: 12px 16px; border-radius: 12px; background: var(--bg3);
     text-align: center; transform: translateY(-160%); transition: transform .3s; pointer-events: none; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
@@ -184,6 +231,7 @@
       <span id="hero-sub"></span>
     </div>
   </div>
+  <div id="recent-box"><h2 id="h-recent"></h2><div class="shelf" id="recent"></div></div>
   <h2 id="h-chart"></h2>
   <div class="chips" id="chart-kinds"></div>
   <div id="chart-list"></div>
@@ -221,8 +269,8 @@
 
 <section class="full" id="full">
   <div class="backdrop" id="backdrop"></div>
-  <div class="bar"><button class="ib" id="close" aria-label="close"></button><span id="from"></span><span style="width:42px"></span></div>
-  <div class="art" id="art"></div>
+  <div class="bar"><button class="ib" id="close" aria-label="close"></button><span id="from"></span><button class="ib" id="qbtn" aria-label="queue"></button></div>
+  <div class="art"><div id="art"></div><div class="lyr" id="lyr"></div></div>
   <div class="info"><div class="t"><b id="f-title">—</b><span id="f-artist"></span></div></div>
   <div class="seek" id="seek"><div class="track"><div class="fill" id="fill"></div><div class="knob" id="knob"></div></div>
     <div class="times"><span id="cur">0:00</span><span id="dur">0:00</span></div></div>
@@ -233,6 +281,13 @@
     <button class="ib" id="next" aria-label="next"></button>
     <button class="ib tg" id="repeat" aria-label="repeat"></button>
   </div>
+  <div class="acts">
+    <button class="ib" id="like" aria-label="like"></button>
+    <button class="ib" id="lyrbtn" aria-label="lyrics"></button>
+    <button class="ib" id="sleep" aria-label="sleep timer"></button>
+    <button class="ib" id="share" aria-label="share"></button>
+  </div>
+  <div class="sheet" id="sheet"><div class="grip"></div><h3 id="t-next"></h3><div class="list" id="next-list"></div></div>
 </section>
 <div class="toast" id="toast"></div>
 <audio id="audio" preload="auto" playsinline></audio>
@@ -257,6 +312,12 @@ const I = {
   home: '<svg viewBox="0 0 24 24"><path d="M11.3 3.3a1 1 0 0 1 1.4 0l8 7.4a1 1 0 0 1 .3.73V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1v-8.57a1 1 0 0 1 .3-.73z"/></svg>',
   search: '<svg viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 0 1 5.96 12.05l4.25 4.24a1 1 0 0 1-1.42 1.42l-4.24-4.25A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"/></svg>',
   coll: '<svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.3-9.2C1.4 8.4 3.6 5 7 5c2 0 3.3 1 5 2.8C13.7 6 15 5 17 5c3.4 0 5.6 3.4 4.3 6.8C19.5 16.4 12 21 12 21z"/></svg>',
+  heart: '<svg viewBox="0 0 24 24"><path d="M12 20.3s-7.2-4.4-8.9-8.8C1.9 8.3 4 5 7.2 5c1.9 0 3.2 1 4.8 2.7C13.6 6 14.9 5 16.8 5c3.2 0 5.3 3.3 4.1 6.5-1.7 4.4-8.9 8.8-8.9 8.8z"/></svg>',
+  heartO: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20.3s-7.2-4.4-8.9-8.8C1.9 8.3 4 5 7.2 5c1.9 0 3.2 1 4.8 2.7C13.6 6 14.9 5 16.8 5c3.2 0 5.3 3.3 4.1 6.5-1.7 4.4-8.9 8.8-8.9 8.8z"/></svg>',
+  lyr: '<svg viewBox="0 0 24 24"><path d="M4 5h16v2H4zm0 4h16v2H4zm0 4h10v2H4zm0 4h7v2H4zm14.5-4a1 1 0 0 1 1 1v4.2a2.5 2.5 0 1 1-2-2.45V14a1 1 0 0 1 1-1z"/></svg>',
+  moon: '<svg viewBox="0 0 24 24"><path d="M14.5 2.5a8.5 8.5 0 1 0 7 13.3 1 1 0 0 0-1.1-1.5A6.5 6.5 0 0 1 13 6.4a6.5 6.5 0 0 1 2.4-2.4 1 1 0 0 0-.9-1.5z"/></svg>',
+  share: '<svg viewBox="0 0 24 24"><path d="M20.7 3.3a1 1 0 0 1 .24 1.04l-5.5 16a1 1 0 0 1-1.85.1l-3.04-6.99-6.99-3.04a1 1 0 0 1 .1-1.85l16-5.5a1 1 0 0 1 1.04.24zM8.06 9.4l4.17 1.81a1 1 0 0 1 .52.52l1.81 4.17L18.1 5.9z"/></svg>',
+  queue: '<svg viewBox="0 0 24 24"><path d="M3 6h13v2H3zm0 5h13v2H3zm0 5h8v2H3zm15-5.5 5 3.5-5 3.5z"/></svg>',
   back: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M15.2 5.3a1 1 0 0 1 0 1.4L9.9 12l5.3 5.3a1 1 0 1 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0z"/></svg>',
 };
 
@@ -267,6 +328,9 @@ const L = {
        likesEmpty: "Нажми ❤️ под треком в боте, и он появится здесь", plEmpty: "Плейлисты создаются кнопкой «📂 В плейлист» под треком в боте",
        sent: "Трек также пришёл в чат 💾", err: "Не получилось, попробуй ещё раз", back: "Назад", nowFrom: "Сейчас играет",
        morning: "Доброе утро", day: "Добрый день", evening: "Добрый вечер", night: "Доброй ночи", chartFail: "Чарт сейчас не загрузился",
+       recent: "Недавно", next: "Далее", noLyrics: "Текста этой песни пока нет", lyrLoad: "Ищу текст…",
+       likeNeed: "Сначала дождись, пока трек загрузится", likedT: "Добавлено в «Мне нравится»", unlikedT: "Убрано из «Мне нравится»",
+       sleepOn: "Музыка выключится через {m} мин", sleepOff: "Таймер сна выключен", queueEnd: "Это последний трек в очереди",
        moodsList: ["Грустное", "В машину", "Для зала", "Той", "Чилл", "О любви", "Фонк", "Ретро"]},
   uz: {home: "Asosiy", search: "Qidiruv", coll: "To'plam", flow: "Mening oqimim", flowSub: "Sevimli treklar va yangi xitlardan cheksiz miks",
        chart: "Chart", world: "🌍 Dunyo", uz: "🇺🇿 O'zbekiston", ru: "🇷🇺 Rossiya", all: "Hammasi", moods: "Kayfiyatga mos", mine: "Mening musiqam",
@@ -274,6 +338,9 @@ const L = {
        likesEmpty: "Botda trek ostidagi ❤️ ni bosing, u shu yerda paydo bo'ladi", plEmpty: "Pleylistlar botda trek ostidagi «📂 Pleylistga» tugmasi bilan yaratiladi",
        sent: "Trek chatga ham yuborildi 💾", err: "Bo'lmadi, yana urinib ko'ring", back: "Orqaga", nowFrom: "Hozir ijroda",
        morning: "Xayrli tong", day: "Xayrli kun", evening: "Xayrli kech", night: "Xayrli tun", chartFail: "Chart hozir yuklanmadi",
+       recent: "Yaqinda", next: "Keyingi", noLyrics: "Bu qo'shiq matni hozircha yo'q", lyrLoad: "Matn qidirilmoqda…",
+       likeNeed: "Avval trek yuklanishini kuting", likedT: "«Yoqtirganlarim»ga qo'shildi", unlikedT: "«Yoqtirganlarim»dan olib tashlandi",
+       sleepOn: "Musiqa {m} daqiqadan keyin o'chadi", sleepOff: "Uyqu taymeri o'chirildi", queueEnd: "Bu navbatdagi oxirgi trek",
        moodsList: ["G'amgin", "Mashinaga", "Zal uchun", "To'y", "Chill", "Sevgi", "Fonk", "Retro"]},
   en: {home: "Home", search: "Search", coll: "Collection", flow: "My stream", flowSub: "An endless mix of your tracks and fresh hits",
        chart: "Chart", world: "🌍 World", uz: "🇺🇿 Uzbekistan", ru: "🇷🇺 Russia", all: "All", moods: "For your mood", mine: "My music",
@@ -281,6 +348,9 @@ const L = {
        likesEmpty: "Tap ❤️ under a track in the bot and it shows up here", plEmpty: "Playlists are made with «📂 To playlist» under a track in the bot",
        sent: "The track also arrived in your chat 💾", err: "Didn't work, try again", back: "Back", nowFrom: "Now playing",
        morning: "Good morning", day: "Good afternoon", evening: "Good evening", night: "Good night", chartFail: "The chart didn't load",
+       recent: "Recently played", next: "Up next", noLyrics: "No lyrics for this song yet", lyrLoad: "Looking for lyrics…",
+       likeNeed: "Wait until the track loads", likedT: "Added to Liked", unlikedT: "Removed from Liked",
+       sleepOn: "Music stops in {m} min", sleepOff: "Sleep timer off", queueEnd: "This is the last track in the queue",
        moodsList: ["Sad", "Car", "Gym", "Wedding", "Chill", "Love", "Phonk", "Retro"]},
 };
 const Y = new Date().getFullYear();
@@ -300,6 +370,21 @@ let me = {likes: [], playlists: []};
 let charts = {}, chartKind = "world", results = [], loading = false;
 let queue = [], order = [], pos = -1, shuffle = false, repeat = false;
 let page = "home", detail = null, prevPage = "home";
+
+/* ---------- per-device memory (may be unavailable: then simply empty) */
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+};
+let recent = store.get("recent", []);
+function remember(it) {
+  const slim = {id: it.fid ? "fid:" + it.fid : it.id, title: it.title, duration: it.duration || 0};
+  if (it.cover || isYt(it.id)) slim.cover = imgOf(it, false);
+  recent = [slim, ...recent.filter(r => r.title.toLowerCase() !== it.title.toLowerCase())].slice(0, 20);
+  store.set("recent", recent);
+}
+const fidOf = it => it ? (it.fid || (it.id.startsWith("fid:") ? it.id.slice(4) : "")) : "";
+const isLiked = it => { const f = fidOf(it); return !!f && me.likes.some(l => l.id === "fid:" + f); };
 
 /* ---------- helpers */
 const fmt = s => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
@@ -347,6 +432,7 @@ function show(p) {
   document.querySelectorAll(".page").forEach(s => s.classList.toggle("on", s.id === "p-" + p));
   document.querySelectorAll(".tabbar button").forEach(b => b.classList.toggle("on", b.dataset.p === (p === "detail" ? prevPage : p)));
   scrollTo(0, 0);
+  document.body.classList.remove("norise"); clearTimeout(show.t); show.t = setTimeout(() => document.body.classList.add("norise"), 700);
   renderPage();
 }
 function renderPage() {
@@ -364,7 +450,7 @@ function applyLang() {
   $("avatar").innerHTML = u && u.photo_url ? `<img src="${esc(u.photo_url)}">` : esc(((u && u.first_name) || "♪")[0]);
   $("hero-title").textContent = S("flow"); $("hero-sub").textContent = S("flowSub");
   $("h-chart").innerHTML = `🔥 ${esc(S("chart"))} <button class="more" id="chart-all">${esc(S("all"))} ›</button>`;
-  $("h-moods").textContent = S("moods"); $("h-mine").textContent = S("mine");
+  $("h-moods").textContent = S("moods"); $("h-recent").textContent = S("recent"); $("t-next").textContent = S("next"); $("h-mine").textContent = S("mine");
   $("t-search").textContent = S("search"); $("q").placeholder = S("q");
   $("from").textContent = S("nowFrom");
   [["home", I.home], ["search", I.search], ["coll", I.coll]].forEach(([k, ic]) => $("tb-" + k).innerHTML = ic + esc(S(k)));
@@ -378,6 +464,10 @@ function renderHome() {
   if (items === undefined) list.innerHTML = '<div class="skel"></div>'.repeat(5);
   else if (!items.length) list.innerHTML = `<div class="empty">${esc(S("chartFail"))}</div>`;
   else { list.innerHTML = rows(items.slice(0, 7), true); bind(list, items); }
+  $("recent-box").style.display = recent.length ? "" : "none";
+  $("recent").innerHTML = recent.map((it, i) => { const [n, a] = split(it.title), src = imgOf(it, false);
+    return `<div class="tile" data-i="${i}"><div class="sq" style="background:${grad(it.title)}">${src ? `<img loading="lazy" src="${esc(src)}" onerror="this.remove()">` : `<span class="emo">♪</span>`}</div><div class="cap">${esc(n)}</div><div class="sub">${esc(a || "—")}</div></div>`; }).join("");
+  $("recent").querySelectorAll(".tile").forEach(t => t.onclick = () => { haptic(); playList(recent.slice(), +t.dataset.i, true); });
   $("moods").innerHTML = MOODS.map(([emo, , c1, c2], i) => `<div class="tile" data-m="${i}"><div class="sq" style="background:linear-gradient(135deg,${c1},${c2})"><span class="emo">${emo}</span>${esc(S("moodsList")[i])}</div></div>`).join("");
   $("moods").querySelectorAll(".tile").forEach(t => t.onclick = () => { haptic(); openMood(+t.dataset.m); });
   const tiles = [`<div class="tile" data-l="1"><div class="sq" style="background:linear-gradient(135deg,#ff4f6d,#b1137a)"><span class="emo">❤️</span>${esc(S("liked"))}</div><div class="sub">${me.likes.length}</div></div>`]
@@ -471,12 +561,15 @@ async function playCurrent() {
   $("art").innerHTML = cover(it, true);
   const src = imgOf(it, true);
   $("backdrop").style.background = src ? `center/cover url("${src}"), ${grad(it.title)}` : grad(it.title);
+  tint(it); resetLyrics(); syncLike(); renderQueue();
   renderPage();
   try {
     if (!it.url) {
       const r = await api("/api/play", {method: "POST", body: JSON.stringify({id: it.id, title: it.title})});
-      it.url = r.url; if (r.sent) toast(S("sent"));
+      it.url = r.url; if (r.fid) it.fid = r.fid; if (r.sent) toast(S("sent"));
     }
+    syncLike(); remember(it);
+    if (full.classList.contains("lyrics")) loadLyrics(it);
     if (current() !== it) return;
     audio.src = it.url;
     await audio.play();
@@ -512,13 +605,13 @@ audio.addEventListener("timeupdate", () => {
 /* full player: open from the mini player, swipe the cover to switch, swipe down to close */
 const full = $("full");
 function openFull() { full.classList.add("show"); haptic("medium"); if (tg && tg.BackButton) tg.BackButton.show(); }
-function closeFull() { full.classList.remove("show"); if (tg && tg.BackButton) tg.BackButton.hide(); }
+function closeFull() { full.classList.remove("show"); $("sheet").classList.remove("show"); if (tg && tg.BackButton) tg.BackButton.hide(); }
 $("mini").onclick = e => { if (!e.target.closest("button")) openFull(); };
 $("close").onclick = closeFull;
 if (tg && tg.BackButton) tg.BackButton.onClick(() => full.classList.contains("show") ? closeFull() : page === "detail" && show(prevPage));
 (() => {
   let x0 = 0, y0 = 0, on = false;
-  full.addEventListener("touchstart", e => { if (e.target.closest("#seek, .ctrl")) return; on = true; x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, {passive: true});
+  full.addEventListener("touchstart", e => { if (e.target.closest("#seek, .ctrl, .acts, .lyr, .sheet")) return; on = true; x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, {passive: true});
   full.addEventListener("touchmove", e => {
     if (!on) return;
     const dx = e.touches[0].clientX - x0, dy = e.touches[0].clientY - y0, cv = $("art").firstElementChild;
@@ -551,15 +644,21 @@ const cv = $("wave"), cx = cv.getContext("2d");
 function sizeWave() { const r = cv.getBoundingClientRect(); cv.width = r.width * devicePixelRatio; cv.height = r.height * devicePixelRatio; }
 addEventListener("resize", sizeWave);
 let energy = 0;
+let pulse = 0;
 function drawWave(t) {
   requestAnimationFrame(drawWave);
-  if (page !== "home" || !cv.width) return;
-  const w = cv.width, h = cv.height, d = devicePixelRatio;
-  let level = audio.paused ? 0 : .35;
+  let level = audio.paused ? 0 : .35 + Math.sin(t / 260) * .08;
   if (analyser && !audio.paused) { analyser.getByteFrequencyData(freq); level = freq.slice(0, 12).reduce((a, b) => a + b, 0) / (12 * 255); }
   energy += (level - energy) * .08;
+  pulse += (level - pulse) * .3;
+  if (full.classList.contains("show")) {
+    document.documentElement.style.setProperty("--glow", Math.max(0, pulse * 1.3 - .15).toFixed(3));
+    if (full.classList.contains("lyrics")) syncLyrics();
+  }
+  if (page !== "home" || !cv.width) return;
+  const w = cv.width, h = cv.height, d = devicePixelRatio;
   cx.fillStyle = "#000"; cx.fillRect(0, 0, w, h);
-  const cols = ["#ffd83d", "#ff8a3d", "#ff3d7f", "#9b5cff", "#3dc8ff"];
+  const cols = [`rgb(${dyn.join(",")})`, "#ff8a3d", "#ff3d7f", "#9b5cff", "#3dc8ff"];
   cx.globalCompositeOperation = "lighter";
   for (let k = 0; k < cols.length; k++) {
     const amp = h * (.07 + energy * .16) * (1 - k * .1), speed = t / (1400 + k * 260), yb = h * (.5 + (k - 2) * .045);
@@ -580,6 +679,149 @@ function drawWave(t) {
   cx.fillStyle = rg; cx.fillRect(0, 0, w, h);
 }
 requestAnimationFrame(drawWave);
+
+/* colours: the whole player takes the main colour of the cover */
+let dyn = [255, 216, 61];
+const tintCache = {};
+function vivid([r, g, b]) {
+  // to HSL, then make it bright enough to shine on black but never neon-white
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l0 = (mx + mn) / 2, dd = mx - mn;
+  let h = 0, s0 = 0;
+  if (dd) { s0 = dd / (1 - Math.abs(2 * l0 - 1)); h = mx === r ? ((g - b) / dd) % 6 : mx === g ? (b - r) / dd + 2 : (r - g) / dd + 4; h *= 60; }
+  const s = Math.max(.55, Math.min(.9, s0)), l = Math.max(.52, Math.min(.66, l0));
+  const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = l - c / 2;
+  const [a, bb, cc] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  return [a, bb, cc].map(v => Math.round((v + m) * 255));
+}
+function fromHash(t) { const hh = hue(t); return vivid(hslToRgb(hh, .7, .55)); }
+function hslToRgb(h, s, l) { const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  return [0, 8, 4].map(n => Math.round(255 * (l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))))); }
+function sample(src) {
+  return new Promise(res => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const c = document.createElement("canvas"); c.width = c.height = 24;
+        const g = c.getContext("2d"); g.drawImage(img, 0, 0, 24, 24);
+        const d = g.getImageData(0, 0, 24, 24).data;
+        let R = 0, G = 0, B = 0, W = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          const mx = Math.max(d[i], d[i + 1], d[i + 2]), mn = Math.min(d[i], d[i + 1], d[i + 2]);
+          const w = ((mx - mn) / 255) ** 2 * (mx > 40 && mx < 250 ? 1 : .05);
+          R += d[i] * w; G += d[i + 1] * w; B += d[i + 2] * w; W += w;
+        }
+        res(W > .5 ? vivid([R / W, G / W, B / W]) : null);
+      } catch (e) { res(null); }
+    };
+    img.onerror = () => res(null);
+    img.src = "/api/cover?u=" + encodeURIComponent(src);
+  });
+}
+async function tint(it) {
+  const src = imgOf(it, false), key = src || it.title;
+  setDyn(tintCache[key] || fromHash(it.title));
+  if (!src || tintCache[key]) return;
+  const c = await sample(src);
+  if (c) { tintCache[key] = c; if (current() === it) setDyn(c); }
+}
+function setDyn(c) {
+  dyn = c;
+  document.documentElement.style.setProperty("--dyn", c.join(" "));
+}
+
+/* lyrics */
+let lyrIdx = -1;
+function resetLyrics() { lyrIdx = -1; $("lyr").innerHTML = ""; $("lyr").className = "lyr"; }
+async function loadLyrics(it) {
+  const box = $("lyr");
+  if (it.lyr === undefined) {
+    box.innerHTML = `<div class="note">${esc(S("lyrLoad"))}</div>`;
+    try { it.lyr = await api("/api/lyrics?title=" + encodeURIComponent(it.title)); } catch (e) { it.lyr = {}; }
+    if (current() !== it) return;
+  }
+  const {synced, text} = it.lyr || {};
+  lyrIdx = -1;
+  if (synced && synced.length) {
+    box.className = "lyr";
+    box.innerHTML = synced.map(([t, line], i) => `<p data-t="${t}" data-i="${i}">${esc(line || "♪")}</p>`).join("");
+    box.querySelectorAll("p").forEach(p => p.onclick = () => { haptic(); audio.currentTime = +p.dataset.t; if (audio.paused) audio.play().catch(() => {}); });
+  } else if (text) {
+    box.className = "lyr plain";
+    box.innerHTML = text.split("\n").map(l => `<p>${esc(l) || "&nbsp;"}</p>`).join("");
+  } else box.innerHTML = `<div class="note">🎤<br>${esc(S("noLyrics"))}</div>`;
+}
+function syncLyrics() {
+  const it = current(), lines = it && it.lyr && it.lyr.synced;
+  if (!lines || !lines.length) return;
+  const now = audio.currentTime + .3;
+  let i = -1;
+  for (let k = 0; k < lines.length && lines[k][0] <= now; k++) i = k;
+  if (i === lyrIdx) return;
+  lyrIdx = i;
+  const ps = $("lyr").querySelectorAll("p");
+  ps.forEach((p, k) => { p.classList.toggle("on", k === i); p.classList.toggle("past", k < i); });
+  const el = ps[Math.max(0, i)], box = $("lyr");
+  if (el) box.scrollTo({top: el.offsetTop - box.clientHeight * .38, behavior: "smooth"});
+}
+$("lyrbtn").onclick = () => {
+  haptic();
+  const on = full.classList.toggle("lyrics");
+  $("lyrbtn").classList.toggle("on", on);
+  const it = current();
+  if (on && it && !$("lyr").children.length) loadLyrics(it);
+};
+
+/* like from the player */
+function syncLike() {
+  const it = current(), b = $("like"), liked = isLiked(it);
+  b.disabled = !fidOf(it);
+  b.classList.toggle("on", liked);
+  b.innerHTML = liked ? I.heart : I.heartO;
+}
+$("like").onclick = async () => {
+  const it = current(); if (!it) return;
+  const f = fidOf(it); if (!f) { toast(S("likeNeed")); return; }
+  try {
+    const r = await api("/api/like", {method: "POST", body: JSON.stringify({id: "fid:" + f, title: it.title, duration: it.duration || Math.round(audio.duration) || 0})});
+    me.likes = r.liked ? [{id: "fid:" + f, title: it.title, duration: it.duration || 0}, ...me.likes] : me.likes.filter(l => l.id !== "fid:" + f);
+    haptic(r.liked ? "ok" : "light"); toast(S(r.liked ? "likedT" : "unlikedT")); syncLike();
+  } catch (e) { toast(e.message); }
+};
+
+/* sleep timer: off -> 15 -> 30 -> 60 min -> off */
+let sleepMin = 0, sleepT = null;
+function syncSleep() { $("sleep").classList.toggle("on", !!sleepMin); $("sleep").innerHTML = I.moon + (sleepMin ? `<small>${sleepMin}</small>` : ""); }
+$("sleep").onclick = () => {
+  haptic();
+  sleepMin = {0: 15, 15: 30, 30: 60, 60: 0}[sleepMin];
+  clearTimeout(sleepT);
+  if (sleepMin) { sleepT = setTimeout(() => { fadeOut(); sleepMin = 0; syncSleep(); }, sleepMin * 60000); toast(S("sleepOn").replace("{m}", sleepMin)); }
+  else toast(S("sleepOff"));
+  syncSleep();
+};
+function fadeOut() {
+  const v0 = audio.volume; let k = 0;
+  const id = setInterval(() => { k++; audio.volume = Math.max(0, v0 * (1 - k / 30)); if (k >= 30) { clearInterval(id); audio.pause(); audio.volume = v0; } }, 100);
+}
+
+/* share: the bot's inline mode puts the song into any chat */
+$("share").onclick = () => {
+  const it = current(); if (!it) return; haptic();
+  try { tg.switchInlineQuery(split(it.title).reverse().filter(Boolean).join(" - "), ["users", "groups", "channels"]); }
+  catch (e) { toast(S("err")); }
+};
+
+/* queue sheet */
+function renderQueue() {
+  const box = $("next-list"); if (!box) return;
+  const up = order.slice(pos + 1, pos + 41).map(k => queue[k]);
+  if (!up.length) { box.innerHTML = `<div class="empty">${esc(S("queueEnd"))}</div>`; return; }
+  box.innerHTML = rows(up);
+  box.querySelectorAll(".row").forEach(r => r.onclick = () => { haptic(); pos += 1 + +r.dataset.i; playCurrent(); });
+}
+$("qbtn").onclick = () => { haptic(); renderQueue(); $("sheet").classList.toggle("show"); };
+$("sheet").querySelector(".grip").onclick = () => $("sheet").classList.remove("show");
 
 /* controls */
 $("pp").onclick = toggle; $("mini-pp").onclick = toggle; $("hero-play").onclick = startFlow;
@@ -607,8 +849,10 @@ $("q").addEventListener("input", () => { if (!$("q").value.trim()) { results = [
 $("pp").innerHTML = $("mini-pp").innerHTML = $("hero-play").innerHTML = I.play;
 $("next").innerHTML = $("mini-next").innerHTML = I.next; $("prev").innerHTML = I.prev;
 $("close").innerHTML = I.down; $("shuffle").innerHTML = I.shuffle; $("repeat").innerHTML = I.repeat;
+$("qbtn").innerHTML = I.queue; $("lyrbtn").innerHTML = I.lyr; $("share").innerHTML = I.share; syncSleep(); syncLike();
 (async () => {
   applyLang(); sizeWave(); renderPage(); loadChart();
+  show.t = setTimeout(() => document.body.classList.add("norise"), 1500);
   try {
     me = await api("/api/me");
     if (me.lang && L[me.lang]) { lang = me.lang; applyLang(); }

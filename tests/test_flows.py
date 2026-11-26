@@ -1206,6 +1206,46 @@ async def test_mini_app_api(env, monkeypatch, stereo_mp3):
         await client.close()
 
 
+async def test_mini_app_like_lyrics_cover(env, monkeypatch):
+    from aiohttp.test_utils import TestClient, TestServer
+    from bot.config import config
+    from bot.services import lyrics
+    from bot.webapp import server
+    session, db, _, _, _ = env
+    monkeypatch.setattr(config, "bot_token", "1:test")
+    found = []
+
+    def fake_synced(title, artist):
+        found.append((title, artist))
+        return [[1.0, "first"], [2.5, "second"]]
+
+    monkeypatch.setattr(lyrics, "find_synced", fake_synced)
+    monkeypatch.setattr(server, "http_get", lambda url, timeout=10: b"JPEG")
+    client = TestClient(TestServer(server.make_app(session.bot, db)))
+    await client.start_server()
+    try:
+        h = {"X-Init-Data": _init_data("1:test")}
+        r = await (await client.post("/api/like", headers=h, json={"id": "fid:F9", "title": "A - B", "duration": 99})).json()
+        assert r == {"liked": True} and (await db.get_likes(USER.id))[0]["id"] == "fid:F9"
+        r = await (await client.post("/api/like", headers=h, json={"id": "fid:F9"})).json()
+        assert r == {"liked": False} and await db.get_likes(USER.id) == []
+        ly = await (await client.get("/api/lyrics?title=Artist - Song (Official Video)", headers=h)).json()
+        assert ly["synced"][1] == [2.5, "second"] and found == [("Song", "Artist")]
+        await client.get("/api/lyrics?title=Artist - Song (Official Video)", headers=h)
+        assert len(found) == 1  # cached
+        ok = await client.get("/api/cover?u=https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg")
+        assert ok.status == 200 and await ok.read() == b"JPEG"
+        assert (await client.get("/api/cover?u=https://evil.example/x.jpg")).status == 403
+        assert (await client.get("/api/cover?u=https://a.mzstatic.com.evil.example/x")).status == 403
+    finally:
+        await client.close()
+
+
+def test_parse_lrc():
+    from bot.services import lyrics
+    assert lyrics.parse_lrc("[00:01.50] a\n[00:03.00][01:00.00] b\nno stamp") == [[1.5, "a"], [3.0, "b"], [60.0, "b"]]
+
+
 async def test_mini_app_url_from_quick_tunnel(env, monkeypatch):
     from aiogram.methods import SetChatMenuButton
     from bot.config import config

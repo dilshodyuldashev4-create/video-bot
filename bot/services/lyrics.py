@@ -113,6 +113,36 @@ def from_lyrics_ovh(title: str, artist: str) -> str | None:
 
 SOURCES = (from_lrclib, from_genius, from_lyrics_ovh)
 
+_LRC = re.compile(r"\[(\d+):(\d+(?:\.\d+)?)\]")
+
+
+def parse_lrc(lrc: str) -> list[list]:
+    """'[01:02.50] line' -> [[62.5, 'line'], ...], sorted by time (a line can carry several stamps)."""
+    out = []
+    for raw in (lrc or "").splitlines():
+        stamps = _LRC.findall(raw)
+        text = _LRC.sub("", raw).strip()
+        for m, s in stamps:
+            out.append([round(int(m) * 60 + float(s), 2), text])
+    return sorted(out, key=lambda x: x[0])
+
+
+def find_synced(title: str, artist: str) -> list[list] | None:
+    """Time-stamped lyrics from LRCLIB for the karaoke view, or None. Blocking: run in a thread."""
+    title = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", title).strip() or title
+    q = f"track_name={urllib.parse.quote(title)}" + (f"&artist_name={urllib.parse.quote(artist)}" if artist else "")
+    try:
+        rows = json.loads(http_get(f"https://lrclib.net/api/search?{q}", timeout=15))
+    except Exception as e:  # noqa: BLE001
+        log.info("synced lyrics failed: %s", str(e)[:120])
+        return None
+    for r in rows or []:
+        if r.get("syncedLyrics") and _matches(title, artist, r.get("trackName") or "", r.get("artistName") or ""):
+            lines = parse_lrc(r["syncedLyrics"])
+            if len(lines) >= 4:
+                return lines
+    return None
+
 
 def find(title: str, artist: str) -> str | None:
     """Lyrics of a song, or None. Blocking: run in a thread."""
