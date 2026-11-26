@@ -55,6 +55,14 @@ CREATE TABLE IF NOT EXISTS plays (
     created INTEGER
 );
 CREATE INDEX IF NOT EXISTS plays_user ON plays(user_id, created);
+CREATE TABLE IF NOT EXISTS listens (
+    user_id INTEGER NOT NULL,
+    artist TEXT,
+    title TEXT,
+    kind TEXT,
+    created INTEGER
+);
+CREATE INDEX IF NOT EXISTS listens_user ON listens(user_id, created);
 CREATE TABLE IF NOT EXISTS follows (
     user_id INTEGER NOT NULL,
     artist_id TEXT NOT NULL,
@@ -338,6 +346,49 @@ class DB:
         await self.conn.execute("INSERT INTO plays(user_id, title, performer, created) VALUES(?,?,?,?)",
                                 (user_id, title or "", performer or "", int(time.time())))
         await self.conn.commit()
+
+    # listens: what the user does in the player (play / finish / skip), for the personal stream
+    async def add_listen(self, user_id: int, artist: str, title: str, kind: str) -> None:
+        await self.conn.execute("INSERT INTO listens(user_id, artist, title, kind, created) VALUES(?,?,?,?,?)",
+                                (user_id, (artist or "")[:120], (title or "")[:200], kind, int(time.time())))
+        await self.conn.commit()
+
+    async def taste(self, user_id: int, days: int = 120) -> dict:
+        """{'artists': [(name, score)...] best first, 'skipped': {titles}, 'recent': {titles}} from the
+        player (finish +3, play +1, skip -3), tracks the bot sent (+1) and likes (+4)."""
+        since = int(time.time()) - days * 86400
+        score: dict[str, float] = {}
+        names: dict[str, str] = {}
+        skipped, recent = set(), set()
+
+        def add(artist: str, pts: float) -> None:
+            for a in re.split(r"\s*(?:,|&| feat\.? | ft\.? | x )\s*", artist or "", flags=re.I)[:2]:
+                a = a.strip()
+                if a:
+                    k = a.lower()
+                    names.setdefault(k, a)
+                    score[k] = score.get(k, 0) + pts
+
+        weights = {"finish": 3, "play": 1, "skip": -3}
+        async with self.conn.execute("SELECT artist, title, kind FROM listens WHERE user_id=? AND created>=? "
+                                     "ORDER BY created DESC LIMIT 2000", (user_id, since)) as cur:
+            for i, (artist, title, kind) in enumerate(await cur.fetchall()):
+                add(artist, weights.get(kind, 0))
+                key = f"{artist} - {title}".lower()
+                if kind == "skip":
+                    skipped.add(key)
+                if i < 40:
+                    recent.add(key)
+        async with self.conn.execute("SELECT performer FROM plays WHERE user_id=? AND created>=? LIMIT 2000",
+                                     (user_id, since)) as cur:
+            for (performer,) in await cur.fetchall():
+                add(performer, 1)
+        for like in await self.get_likes(user_id, limit=200):
+            artist, _, title = like["title"].partition(" - ")
+            if title:
+                add(artist, 4)
+        best = sorted(((names[k], v) for k, v in score.items() if v > 0), key=lambda x: -x[1])
+        return {"artists": best, "skipped": skipped, "recent": recent}
 
     async def year_stats(self, user_id: int, year: int) -> dict:
         import datetime as _dt

@@ -1,5 +1,6 @@
 """Everything that talks to yt-dlp: music search, MP3 download, video download."""
 import asyncio
+import collections
 import difflib
 import logging
 import re
@@ -25,6 +26,15 @@ _JUNK = re.compile(
     r"(?:video)?[\)\]]",
     re.IGNORECASE,
 )
+
+
+# the last songs nobody could get, with every source's reason: shown in /admin → Диагностика
+RECENT_FAILURES: "collections.deque[tuple[float, str, str]]" = collections.deque(maxlen=8)
+_active = 0
+
+
+def active_downloads() -> int:
+    return _active
 
 
 class DownloadFailed(Exception):
@@ -317,6 +327,15 @@ MAX_YT_TRIES = 5
 
 
 async def download_song(title: str, artist: str = "", prefer_id: str | None = None) -> AudioFile:
+    global _active
+    _active += 1
+    try:
+        return await _download_song(title, artist, prefer_id)
+    finally:
+        _active -= 1
+
+
+async def _download_song(title: str, artist: str = "", prefer_id: str | None = None) -> AudioFile:
     """Get an MP3 of a song no matter what: the chosen YouTube video, then MP3 catalogue
     sites (work even when YouTube blocks the server), then the next best YouTube matches,
     then SoundCloud. Single sources often fail (region-locked, removed, blocked server IP)."""
@@ -369,6 +388,7 @@ async def download_song(title: str, artist: str = "", prefer_id: str | None = No
         except DownloadFailed as e:
             errors.append(f"sc:{q}: {str(e)[:120]}")
     log.warning("no MP3 for %r / %r: %s", artist, title, " | ".join(errors))
+    RECENT_FAILURES.append((time.time(), f"{artist} - {title}" if artist else title, " | ".join(errors)))
     raise DownloadFailed("; ".join(errors) or "nothing found")
 
 

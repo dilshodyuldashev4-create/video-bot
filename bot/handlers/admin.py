@@ -4,6 +4,7 @@ Who is an admin: ADMIN_IDS from .env, plus admins added from the panel.
 If there are no admins at all yet, the first person to send /admin becomes the owner.
 """
 import asyncio
+import time
 import logging
 import shutil
 
@@ -339,6 +340,10 @@ async def diag_text() -> str:
     lines.append(f"<b>Плеер (Mini App)</b>: {esc(public_url()) if public_url() else '⏳ ждёт туннель cloudflared'}")
     if downloader.youtube_blocked():
         lines.append("⚠️ YouTube сейчас блокирует сервер: MP3 берутся из других источников")
+    if downloader.RECENT_FAILURES:
+        lines += ["", "<b>Последние треки, которые не скачались</b> (причина от каждого источника):"]
+        for ts, name, why in list(downloader.RECENT_FAILURES)[-3:]:
+            lines.append(f"• {time.strftime('%H:%M', time.localtime(ts))} <b>{esc(name[:60])}</b>\n  <code>{esc(why[:300])}</code>")
     return "\n".join(lines)
 
 
